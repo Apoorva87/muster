@@ -53,6 +53,7 @@ help:
 	@echo "  make serve             run the Muster service in the foreground"
 	@echo "  make register          register the running service with Restate"
 	@echo "  make migrate           create the Postgres schema"
+	@echo "  make demo              two-team bus demo (no Docker)"
 	@echo "  make test              unit suite (no Docker, no Restate, no Postgres)"
 	@echo "  make test-integration  integration suite (needs 'make up' + 'make deps')"
 	@echo "  make logs / make ps    inspect the stack"
@@ -117,6 +118,13 @@ dev: up migrate
 # publish() resolves to zero subscribers and the demo silently does nothing.
 migrate:
 	$(UV) run --extra postgres python -m app.main migrate
+
+# ----------------------------------------------------------------------- demo
+
+# The Day-2 demonstration: two independently defined teams, one bus session,
+# a cross-team command and a cross-team event. Needs no infrastructure.
+demo:
+	$(UV) run pytest tests/test_two_team_demo.py tests/test_demo_flow.py -v
 
 # ---------------------------------------------------------------------- tests
 

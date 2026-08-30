@@ -71,6 +71,14 @@ Recorded in `docs/superpowers/specs/v1-runtime-decisions.md`. Do not relitigate 
   button cannot resume a workflow without it.
 - V2 `Effect` owns only the status machine and reconciliation, sitting on top of
   `run_typed()` — it never wraps or replaces the durable step.
+- A topic crosses a team boundary **only if the team declares it in `public.topics`**.
+  Team-local subscribers are woken directly, so nothing is ever woken twice.
+- The agent registry is keyed by `(team, name)`. Unscoped registration (`team=""`)
+  stays reachable from anywhere, which is what keeps V1 callers working.
+- `app/` imports `bus/` **lazily, inside the function**, never at module top level.
+  A standalone V1 team must work with the bus package absent.
+- Cross-team artifacts cross **by reference**: the receiving team registers the ID
+  with `path=""` and `meta.external=True`; the bytes stay with the producing team.
 
 ## Testing
 
