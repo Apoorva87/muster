@@ -32,6 +32,5 @@ restate-data/
 .firecrawl/
 .playwright-mcp/
 
-# uv
+# uv (uv.lock IS committed — it is what makes setup reproducible)
 .venv/
-uv.lock

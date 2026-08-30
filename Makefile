@@ -1,12 +1,16 @@
 # Muster — local durable runtime.
 #
 # `make dev` is the one command that should give you a working system:
-# infrastructure up, Muster's Restate service running, deployment registered.
+# infrastructure up, schema created, Muster's Restate service running and its
+# deployment registered.
 #
-# Nothing in here hides a failure: no `|| true`, no discarded exit codes, and
-# stderr is redirected in exactly one place (the connection probe in
-# `wait-service`, where a refused connection is the expected state while
-# waiting, and the real failure is reported loudly at the end).
+# Nothing in here hides a failure: no `|| true`, no discarded exit codes.
+# stderr is redirected in exactly one place — the connection probe in
+# WAIT_FOR_SERVICE, where "connection refused" is the expected state while
+# waiting; the real timeout failure is reported on stderr and exits 1.
+#
+# The service itself is NOT containerised, so you can restart it without a
+# rebuild. Restate reaches it over host.docker.internal (see docker-compose.yml).
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -20,8 +24,6 @@ RESTATE_INGRESS_URL ?= http://localhost:8080
 
 MUSTER_SERVICE_HOST ?= 0.0.0.0
 MUSTER_SERVICE_PORT ?= 9080
-# Restate runs in a container and reaches the host through host.docker.internal,
-# which docker-compose.yml maps to host-gateway so WSL2 behaves like Desktop.
 MUSTER_SERVICE_URI ?= http://host.docker.internal:$(MUSTER_SERVICE_PORT)/
 
 POSTGRES_HOST ?= localhost
@@ -31,21 +33,34 @@ POSTGRES_USER ?= muster
 POSTGRES_PASSWORD ?= change-me
 DATABASE_URL ?= postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)
 
-.PHONY: help deps up down dev serve register migrate test test-integration logs ps clean wait-service
+# Uvicorn is HTTP/1.1 only, which is why registration sets use_http_11. Swap in
+# hypercorn if HTTP/2 throughput ever justifies the extra dependency.
+SERVE_CMD = $(UV) run --extra durable uvicorn --factory app.runtime.durable:create_app --host $(MUSTER_SERVICE_HOST) --port $(MUSTER_SERVICE_PORT)
+
+# Kept as single-line variables so `dev` can chain them inside one shell (and so
+# `make -n dev` stays a dry run — a recipe mentioning $(MAKE) would really run).
+WAIT_FOR_SERVICE = for attempt in $$(seq 1 60); do if (exec 3<>/dev/tcp/127.0.0.1/$(MUSTER_SERVICE_PORT)) 2>/dev/null; then break; fi; if [ $$attempt -eq 60 ]; then echo "muster service never opened port $(MUSTER_SERVICE_PORT)" >&2; exit 1; fi; sleep 0.5; done
+REGISTER_DEPLOYMENT = curl -fsS -X POST $(RESTATE_ADMIN_URL)/deployments -H 'content-type: application/json' -d '{"uri": "$(MUSTER_SERVICE_URI)", "use_http_11": true, "force": true}'
+
+.PHONY: help deps up down clean logs ps dev serve register wait-service migrate test test-integration
 
 help:
 	@echo "Muster targets:"
 	@echo "  make deps              install the durable + postgres extras"
 	@echo "  make up                start Restate and Postgres, wait for healthy"
-	@echo "  make down              stop them (volumes kept)"
-	@echo "  make dev               up + run the Muster service + register it"
+	@echo "  make down              stop them (named volumes kept)"
+	@echo "  make dev               up + migrate + run the service + register it"
 	@echo "  make serve             run the Muster service in the foreground"
 	@echo "  make register          register the running service with Restate"
 	@echo "  make migrate           create the Postgres schema"
 	@echo "  make test              unit suite (no Docker, no Restate, no Postgres)"
-	@echo "  make test-integration  integration suite (needs 'make up')"
+	@echo "  make test-integration  integration suite (needs 'make up' + 'make deps')"
 	@echo "  make logs / make ps    inspect the stack"
 	@echo "  make clean             down + delete the named volumes"
+	@echo
+	@echo "  ingress   $(RESTATE_INGRESS_URL)"
+	@echo "  admin/UI  $(RESTATE_ADMIN_URL)"
+	@echo "  service   http://localhost:$(MUSTER_SERVICE_PORT)"
 
 # ------------------------------------------------------------------ toolchain
 
@@ -71,40 +86,28 @@ logs:
 ps:
 	$(COMPOSE) ps
 
-# -------------------------------------------------------------- muster service
+# ------------------------------------------------------------- muster service
 
-# Uvicorn is HTTP/1.1 only; `register` tells Restate so. Swap in hypercorn for
-# HTTP/2 if throughput ever justifies the extra dependency.
 serve:
-	$(UV) run --extra durable uvicorn --factory app.runtime.durable:create_app \
-		--host $(MUSTER_SERVICE_HOST) --port $(MUSTER_SERVICE_PORT)
+	$(SERVE_CMD)
 
-# Restate discovers handlers by calling the service, so the service must
-# already be listening when this runs.
+wait-service:
+	$(WAIT_FOR_SERVICE)
+
+# Restate discovers handlers by calling the service, so it must already be
+# listening when this runs. `make dev` sequences that for you.
 register:
-	curl -fsS -X POST $(RESTATE_ADMIN_URL)/deployments \
-		-H 'content-type: application/json' \
-		-d '{"uri": "$(MUSTER_SERVICE_URI)", "use_http_11": true, "force": true}'
+	$(REGISTER_DEPLOYMENT)
 	@echo
 	@echo "registered $(MUSTER_SERVICE_URI) with $(RESTATE_ADMIN_URL)"
 
-wait-service:
-	for attempt in $$(seq 1 60); do \
-		if (exec 3<>/dev/tcp/127.0.0.1/$(MUSTER_SERVICE_PORT)) 2>/dev/null; then \
-			exit 0; \
-		fi; \
-		sleep 0.5; \
-	done; \
-	echo "muster service never opened port $(MUSTER_SERVICE_PORT)" >&2; \
-	exit 1
-
 dev: up migrate
-	$(UV) run --extra durable uvicorn --factory app.runtime.durable:create_app \
-		--host $(MUSTER_SERVICE_HOST) --port $(MUSTER_SERVICE_PORT) & \
+	$(SERVE_CMD) & \
 	APP_PID=$$!; \
 	trap 'kill $$APP_PID' EXIT INT TERM; \
-	$(MAKE) wait-service; \
-	$(MAKE) register; \
+	$(WAIT_FOR_SERVICE); \
+	$(REGISTER_DEPLOYMENT); \
+	echo; \
 	echo "muster is up — ingress $(RESTATE_INGRESS_URL), admin UI $(RESTATE_ADMIN_URL)"; \
 	wait $$APP_PID
 

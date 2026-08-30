@@ -30,20 +30,27 @@ Requires [uv](https://docs.astral.sh/uv/) and Docker (Desktop, or Engine under W
 
 ```bash
 git clone https://github.com/Apoorva87/muster.git && cd muster
-cp .env.example .env          # edit if you want a real model; the stub needs nothing
-uv sync                       # kernel + web only, no durable stack needed
-uv run pytest                 # 174 tests, no Docker required
+./setup.sh
 ```
+
+That installs the toolchain, dependencies and `.env`, then runs the 174-test
+suite to prove it worked. It needs no Docker and no model endpoint — the LLM
+defaults to a deterministic stub. Add `--install-uv` if you don't have uv yet,
+`--help` for the rest.
 
 To run the durable stack:
 
 ```bash
-uv sync --extra durable --extra postgres
+./setup.sh --durable          # adds restate-sdk, pydantic-ai, psycopg
 make up                       # Restate + Postgres
 make migrate                  # create schema, seed the subscription table
-make serve                    # Muster agent service (registers with Restate)
+make dev                      # run the Muster service and register it
 uv run python -m app.main web # timeline + approvals at http://localhost:8000
 ```
+
+Not using uv? `requirements.txt` (runtime) and `requirements-dev.txt` (with test
+tooling) are generated from `uv.lock` and work with plain `pip install -r`.
+Regenerate them with `./setup.sh --lock`.
 
 `make help` lists every target. Nothing swallows errors — if a step fails you see why.
 
