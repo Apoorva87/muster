@@ -22,6 +22,7 @@ one bus session, with the whole suite runnable on a laptop with no Docker.
 | V1 | Local durable agent runtime — one team | built | [PRD](docs/prd/v1-local-durable-runtime.md) · [plan](docs/superpowers/plans/2026-08-30-v1-local-durable-runtime.md) · [decisions](docs/superpowers/specs/v1-runtime-decisions.md) |
 | V2 | Multi-team bus, addressing, effects, tracing | built | [PRD](docs/prd/v2-multi-team-bus.md) |
 | V3 | `team.yaml` + template for any custom team | built | [PRD](docs/prd/v3-custom-teams.md) |
+| V4 | Per-team memory as markdown; teams learn across projects | **spec only** | [PRD](docs/prd/v4-team-memory.md) |
 
 A2A and Buzz ship as **interfaces only**, which both PRDs explicitly permit.
 
