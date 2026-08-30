@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 from app.kernel.artifacts import ArtifactRef, ArtifactStore
+from app.kernel.memory import (MemoryKind, MemoryNote, MemoryRef, MemoryStore,
+                               NullMemoryStore)
 from app.kernel.models import Artifact, Task
 from app.kernel.runtime import ApprovalDecision, Kernel
 
@@ -90,11 +92,15 @@ class AgentContext:
 
     def __init__(self, *, kernel: Kernel, llm: LLMRunner | None = None,
                  prompts_dir: Path | None = None,
-                 probes: dict[str, Callable[[], Awaitable[dict[str, Any]]]] | None = None) -> None:
+                 probes: dict[str, Callable[[], Awaitable[dict[str, Any]]]] | None = None,
+                 memory: MemoryStore | None = None,
+                 recall_limit: int = 3) -> None:
         self._kernel = kernel
         self._llm = llm or StubLLMRunner()
         self._prompts = prompts_dir or Path(__file__).parent.parent / "prompts"
         self._probes = probes or {}
+        self._memory = memory or NullMemoryStore()
+        self._recall_limit = recall_limit
 
     @property
     def project_id(self) -> str:
@@ -145,6 +151,53 @@ class AgentContext:
             id=ref.id, project_id=self.project_id, task_id=task.id, type=type,
             path=str(path) if path else "", created_by=author))
         return ref
+
+    @property
+    def memory(self) -> MemoryStore:
+        """The team's memory. Disabled by default; never injects anything."""
+        return self._memory
+
+    async def recall(self, query: str, *, limit: int | None = None,
+                     kinds: list[MemoryKind] | None = None) -> list[MemoryRef]:
+        """Ask memory for help. Nothing arrives unless an agent asks.
+
+        Journalled, because the result steers what the agent does next and the
+        corpus may have moved on between a first attempt and a replay. Returns
+        **references** — the note body is loaded only by an explicit
+        :meth:`load_memory`, exactly as artifacts work.
+        """
+        cap = limit or self._recall_limit
+        wanted = [k.value for k in kinds] if kinds else None
+
+        async def _read() -> list[dict[str, Any]]:
+            found = await self._memory.recall(
+                query, limit=cap,
+                kinds=[MemoryKind(k) for k in wanted] if wanted else None)
+            return [ref.model_dump(mode="json") for ref in found]
+
+        rows = await self._kernel.step(f"recall:{query[:40]}", _read)
+        return [MemoryRef(**row) for row in rows]
+
+    async def load_memory(self, ref: MemoryRef | str) -> MemoryNote:
+        """Load a note the agent decided it wanted."""
+        note_id = ref if isinstance(ref, str) else ref.id
+
+        async def _read() -> dict[str, Any]:
+            return (await self._memory.get(note_id)).model_dump(mode="json")
+
+        return MemoryNote(**await self._kernel.step(f"memory:{note_id}", _read))
+
+    async def remember(self, *, kind: MemoryKind, subject: str, summary: str,
+                       sources: list[str] | None = None,
+                       evidence: str | None = None, **kwargs: Any) -> MemoryRef:
+        """Record something learned. Journalled, so a replay does not duplicate."""
+        async def _write() -> dict[str, Any]:
+            ref = await self._memory.remember(
+                kind=kind, subject=subject, summary=summary,
+                sources=sources or [], evidence=evidence, **kwargs)
+            return ref.model_dump(mode="json")
+
+        return MemoryRef(**await self._kernel.step(f"remember:{subject[:40]}", _write))
 
     async def probe(self, name: str) -> dict[str, Any]:
         """A cheap deterministic external check. No LLM involved."""

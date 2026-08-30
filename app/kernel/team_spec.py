@@ -30,6 +30,27 @@ class AgentSpec(BaseModel):
     #: stronger one for the critic is the common shape.
     provider: str | None = None
     model: str | None = None
+    #: off | read | read-write. Unset inherits the team default. A critic that
+    #: remembers past objections is useful; a research agent that accumulates
+    #: opinions usually is not.
+    memory: str | None = None
+
+    @field_validator("memory", mode="before")
+    @classmethod
+    def _yaml_off_is_not_a_boolean(cls, value: Any) -> Any:
+        """YAML 1.1 reads bare ``off`` as ``False``.
+
+        Everyone writes ``memory: off``, so accept what they meant instead of
+        failing with a type error about a boolean they never typed. ``on`` is
+        not a permission, so a True gets a message naming the real options.
+        """
+        if value is False:
+            return "off"
+        if value is True:
+            raise ValueError(
+                "memory: on is not a permission — use read or read-write "
+                "(and quote it if you meant the string)")
+        return value
 
 
 class SubscriptionSpec(BaseModel):
@@ -78,6 +99,12 @@ class TeamSpec(BaseModel):
         """
         problems: list[str] = []
 
+        for name, spec in self.agents.items():
+            if spec.memory not in (None, "off", "read", "read-write"):
+                problems.append(
+                    f"agent {name!r}: memory must be off|read|read-write, "
+                    f"got {spec.memory!r}")
+
         for subscription in self.subscriptions:
             if subscription.agent not in self.agents:
                 problems.append(
@@ -113,6 +140,11 @@ class TeamSpec(BaseModel):
         """``(provider, model)`` overrides for ``agent``; None means inherit."""
         spec = self.agents.get(agent)
         return (spec.provider, spec.model) if spec else (None, None)
+
+    def memory_for(self, agent: str) -> str | None:
+        """``off`` | ``read`` | ``read-write``, or None to inherit."""
+        spec = self.agents.get(agent)
+        return spec.memory if spec else None
 
     def subscription_pairs(self) -> list[tuple[str, str]]:
         return [(s.topic, s.agent) for s in self.subscriptions]

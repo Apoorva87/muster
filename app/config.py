@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     bus_adapter: str = "local"
     team_id: str = "investment"
 
+    #: filesystem | gbrain | none. `none` is fully supported, not a stub: a
+    #: team with memory disabled behaves exactly as it did in V3.
+    memory_backend: str = "filesystem"
+    memory_root: Path | None = None
+    memory_recall_limit: int = 3
+    #: decisions | explicit | off — when the team is allowed to write.
+    memory_write_policy: str = "decisions"
+    gbrain_binary: str = "gbrain"
+
+    def memory_root_for(self, team_id: str) -> Path:
+        return self.memory_root or Path("teams") / team_id / "memory"
+
     @property
     def database_url(self) -> str:
         return (f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"

@@ -23,7 +23,9 @@ from app.kernel.context import FakeKernelContext
 from app.kernel.models import Task
 from app.kernel.runtime import Kernel
 from app.kernel.subscriptions import SubscriptionRegistry
+from app.kernel.memory import MemoryStore
 from app.kernel.team_spec import TeamSpec, load_team_spec
+from app.memory import apply_permission, build_memory_store
 from app.runtime.llm import LLMRegistry
 
 
@@ -33,7 +35,10 @@ class LocalRunner:
     def __init__(self, team_dir: str | Path, *, repository: Repository,
                  artifact_root: Path, llm: LLMRunner | LLMRegistry | None = None,
                  bus: Any = None, session_id: str = "local",
-                 project_id: str | None = None) -> None:
+                 project_id: str | None = None,
+                 memory: MemoryStore | None = None,
+                 memory_backend: str = "none",
+                 recall_limit: int = 3) -> None:
         self.directory = Path(team_dir)
         self.spec: TeamSpec = load_team_spec(self.directory)
         self.spec.load_entrypoints()
@@ -49,6 +54,12 @@ class LocalRunner:
         self.llm = llm if llm is not None else LLMRegistry(provider="stub")
         self.bus = bus
         self.session_id = session_id
+        # Off by default: a team must behave exactly as it did in V3 unless
+        # someone turns memory on.
+        self.memory = memory or build_memory_store(
+            backend=memory_backend, team_id=self.team_id,
+            root=self.directory / "memory")
+        self.recall_limit = recall_limit
 
     def kernel(self, ctx: FakeKernelContext | None = None) -> Kernel:
         return Kernel(ctx=ctx or self.ctx, repository=self.repo,
@@ -64,11 +75,17 @@ class LocalRunner:
         provider, model = self.spec.llm_for(agent)
         return self.llm.for_agent(provider, model)
 
+    def memory_for(self, agent: str) -> MemoryStore:
+        """Narrow the team's memory to what this agent may do with it."""
+        return apply_permission(self.memory, self.spec.memory_for(agent))
+
     def agent_context(self, agent: str = "") -> AgentContext:
         """One invocation, one journal — the same scoping Restate applies."""
         return AgentContext(kernel=self.kernel(self.ctx.invocation()),
                             llm=self.llm_for(agent),
-                            prompts_dir=self.directory / "prompts")
+                            prompts_dir=self.directory / "prompts",
+                            memory=self.memory_for(agent),
+                            recall_limit=self.recall_limit)
 
     def inbound_task(self, send) -> Task:
         """Reconstruct this team's own task from an incoming send.
