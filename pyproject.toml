@@ -31,6 +31,10 @@ otel = [
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-otlp>=1.27",
 ]
+buzz = [
+    "coincurve>=21.0.0",
+    "websockets>=16.1.1",
+]
 
 [dependency-groups]
 dev = [

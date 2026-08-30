@@ -375,7 +375,7 @@ async def test_a2a_adapter_contract(registry, ctx_factory):
     # carrying the same correlation_id, with artifacts passed by reference.
 
 
-# -- deferred seams: Buzz -------------------------------------------------
+# -- Buzz control plane (now live; see tests/test_buzz.py) -----------------
 
 def test_buzz_projector_is_a_protocol_describing_the_seam():
     from typing import Protocol
@@ -384,9 +384,13 @@ def test_buzz_projector_is_a_protocol_describing_the_seam():
         assert hasattr(buzz.BuzzProjector, op)
 
 
-def test_buzz_adapter_is_an_unimplemented_stub():
-    with pytest.raises(NotImplementedError, match="deferred"):
-        buzz.BuzzControlPlaneAdapter()
+def test_buzz_is_implemented_and_lives_behind_the_allow_list():
+    """The projection moved from deferred to live; the filter did not move."""
+    from bus.adapters import buzz_live
+    assert hasattr(buzz_live, "BuzzControlPlane")
+    assert hasattr(buzz_live, "BuzzCommandListener")
+    # The allow-list still governs what a human room can ever see.
+    assert buzz_live.BuzzControlPlane.project_run.__doc__
 
 
 def test_buzz_projects_only_semantic_events():
@@ -409,12 +413,17 @@ def test_buzz_filter_is_an_allow_list():
     assert not buzz.is_semantic(None)
 
 
-def test_buzz_module_documents_why_it_is_deferred():
+def test_buzz_module_still_states_it_is_not_the_transport():
+    """The boundary survives implementation — Buzz observes, it never routes."""
     collapsed = " ".join(buzz.__doc__.split()).replace("*", "")
     assert "not the durable execution engine" in collapsed
     assert "not our internal wire protocol" in collapsed
-    assert "V2-complete would do" in buzz.__doc__
-    assert "deferral" in buzz.DEFERRED
+
+
+def test_run_events_map_onto_the_semantic_vocabulary():
+    assert buzz.topic_for_run("task.sent") == "task.started"
+    assert buzz.topic_for_run("approval.requested") == "approval.waiting"
+    assert buzz.topic_for_run("event.delivered") is None
 
 
 def test_buzz_adds_no_dependency():
@@ -429,14 +438,11 @@ def test_buzz_adds_no_dependency():
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Buzz implementation deferred; see bus/adapters/buzz.py")
-async def test_buzz_projection_contract():
-    """Contract a Buzz projector must satisfy once implemented.
+async def test_buzz_projection_against_a_real_relay():
+    """Contract against Block's Buzz relay itself.
 
-    Deselected by default and skipped besides: it needs a running Buzz/Nostr
-    stack, which V2 keeps optional in favour of the V1 local timeline UI.
+    Deselected by default: it needs a running Buzz stack (Rust relay + Postgres
+    + Redis + MinIO). The same code is exercised end to end against the local
+    dev relay in tests/test_buzz_demo.py, which needs no infrastructure.
     """
-    projector = buzz.BuzzControlPlaneAdapter(endpoint="http://localhost:0")
-    await projector.ensure_room("workstation-01")
-    assert await projector.project(event(topic="proposal.ready")) is not None
-    assert await projector.project(event(topic="tool.called")) is None
+    pytest.skip("set BUZZ_RELAY_URL and run with -m integration")

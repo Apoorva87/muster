@@ -1,4 +1,7 @@
-"""Buzz control-plane seam — INTERFACE ONLY, implementation deferred.
+"""Buzz control-plane seam — the contract and the projection allow-list.
+
+The live implementation is ``bus.adapters.buzz_live``. This module stays free of
+any transport so the allow-list can be imported and tested without a relay.
 
 Buzz is a **control plane**, not the bus. It carries human/agent rooms,
 approvals, agent identities and a searchable semantic audit trail. It is *not*
@@ -10,22 +13,8 @@ reach Buzz. See ``SEMANTIC_TOPICS``. Mirroring every tool call, retry, token
 count or DB operation into a human room would turn an audit trail into a log
 file and make approvals unfindable — the PRD forbids it explicitly.
 
-The V2 PRD allows keeping this adapter "implemented/optional" and retaining the
-V1 local UI as the default control plane. We take the lighter option: define the
-seam, add **no dependency** (Buzz would bring a Nostr relay and its own local
-deployment weight), and leave the local timeline UI as the control plane.
-
-What V2-complete would do
--------------------------
-* Filter every published bus event through :func:`is_semantic`, dropping the rest.
-* Map ``session_id`` -> room, ``source_team``/``source_agent`` -> agent identity,
-  ``project_id``/``task_id`` -> thread, so history stays searchable per project.
-* Post a human-readable progress line carrying **references** (``artifact_refs``),
-  never the artifact body.
-* For an approval, post the prompt and hand the human response back as a durable
-  signal that resolves the workflow's awakeable — no LLM polls while waiting.
-* Run every post inside ``ctx.run_typed(...)`` so a replay does not double-post;
-  Buzz is an external side effect like any other.
+The V1 local timeline UI remains the default control plane; Buzz is opt-in and
+needs the ``buzz`` extra plus a relay.
 """
 
 from __future__ import annotations
@@ -57,12 +46,22 @@ NEVER_PROJECTED: frozenset[str] = frozenset({
     "db.write",
 })
 
-#: Why every entry point below raises. Asserted by the contract test.
-DEFERRED = (
-    "Buzz is an optional control plane, not the durable execution engine. The "
-    "V2 PRD permits keeping the adapter optional and retaining the V1 local UI "
-    "as the default control plane; this is that deferral."
-)
+#: Muster's internal run events, mapped onto the semantic vocabulary a human
+#: reads in a room. Anything absent from this map is invisible to Buzz — the
+#: allow-list direction, so a new internal event never leaks by accident.
+RUN_EVENT_TO_TOPIC: dict[str, str] = {
+    "task.sent": "task.started",
+    "approval.requested": "approval.waiting",
+    "task.completed": "task.completed",
+    "run.failed": "system.agent.failed",
+}
+
+#: Artifact types that carry their own semantic topic when produced.
+ARTIFACT_TO_TOPIC: dict[str, str] = {
+    "proposal": "proposal.ready",
+    "critique": "critique.ready",
+    "synthesis": "decision.completed",
+}
 
 
 def is_semantic(topic: str | None) -> bool:
@@ -91,25 +90,13 @@ class BuzzProjector(Protocol):
         """The published identity for one agent in the room."""
 
 
-class BuzzControlPlaneAdapter:
-    """Stub Buzz projector. Not implemented.
+def topic_for_run(event_type: str, artifact_type: str | None = None) -> str | None:
+    """The semantic topic for a Muster run event, or None if it stays internal.
 
-    Shaped as a projector rather than a ``BusAdapter``: Buzz observes the bus,
-    it never routes for it. Keeping those two roles apart is what stops Buzz
-    from being mistaken for the transport.
+    Shaped as a projector input rather than a ``BusAdapter`` call: Buzz observes
+    the bus, it never routes for it. Keeping those two roles apart is what stops
+    Buzz from being mistaken for the transport.
     """
-
-    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-        raise NotImplementedError(f"BuzzControlPlaneAdapter is deferred. {DEFERRED}")
-
-    async def ensure_room(self, session_id: str) -> str:
-        raise NotImplementedError(DEFERRED)
-
-    async def project(self, event: Message) -> str | None:
-        raise NotImplementedError(DEFERRED)
-
-    async def request_approval(self, event: Message, awakeable_id: str) -> str:
-        raise NotImplementedError(DEFERRED)
-
-    async def agent_identity(self, team_id: str, agent: str) -> dict[str, Any]:
-        raise NotImplementedError(DEFERRED)
+    if artifact_type and artifact_type in ARTIFACT_TO_TOPIC:
+        return ARTIFACT_TO_TOPIC[artifact_type]
+    return RUN_EVENT_TO_TOPIC.get(event_type)
