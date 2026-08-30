@@ -25,6 +25,11 @@ class SpecError(ValueError):
 class AgentSpec(BaseModel):
     entrypoint: str
     capabilities: list[str] = Field(default_factory=list)
+    #: Optional per-agent model selection. Unset means the team default, which
+    #: means the deployment default. A cheap local model for routine work and a
+    #: stronger one for the critic is the common shape.
+    provider: str | None = None
+    model: str | None = None
 
 
 class SubscriptionSpec(BaseModel):
@@ -103,6 +108,11 @@ class TeamSpec(BaseModel):
                     f"agent {name!r} entrypoint {spec.entrypoint!r} "
                     f"is not importable: {exc}") from exc
         return loaded
+
+    def llm_for(self, agent: str) -> tuple[str | None, str | None]:
+        """``(provider, model)`` overrides for ``agent``; None means inherit."""
+        spec = self.agents.get(agent)
+        return (spec.provider, spec.model) if spec else (None, None)
 
     def subscription_pairs(self) -> list[tuple[str, str]]:
         return [(s.topic, s.agent) for s in self.subscriptions]

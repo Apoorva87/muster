@@ -27,10 +27,14 @@ class Settings(BaseSettings):
     artifact_root: Path = Path("./data/artifacts")
     web_port: int = 8000
 
+    #: One of app.runtime.llm.PROVIDERS: stub | anthropic | openai | ollama
+    #: | claude_code | codex. Default costs nothing and needs no network.
     llm_provider: str = "stub"
     llm_base_url: str = ""
     llm_model: str = ""
     llm_api_key: str = ""
+    llm_effort: str = "medium"
+    llm_timeout: float = 600.0
 
     bus_adapter: str = "local"
     team_id: str = "investment"

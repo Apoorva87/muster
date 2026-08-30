@@ -39,6 +39,39 @@ That last command runs a whole team in-process and prints the timeline — no
 Docker, no Postgres, no model endpoint. Add `--cross-team` to run two teams
 over the bus, `--reject` to take the rejection path.
 
+## Choosing a model
+
+```bash
+uv run python -m app.main providers        # what is usable on this machine
+uv run python -m app.main run --provider ollama --model llama3.2:3b "..."
+```
+
+| `LLM_PROVIDER` | Kind | Needs |
+|---|---|---|
+| `stub` | — | nothing. Deterministic; the default |
+| `anthropic` | API | `uv sync --extra anthropic` + `ANTHROPIC_API_KEY` (or `ant auth login`) |
+| `openai` | API | `uv sync --extra openai` + `OPENAI_API_KEY` |
+| `ollama` | API | `uv sync --extra openai` + a running Ollama; no key |
+| `claude_code` | CLI agent | the `claude` binary on PATH |
+| `codex` | CLI agent | the `codex` binary on PATH |
+
+The CLI providers are not chat completions — they run a full coding agent with
+its own tools and file access, and return its final answer. Same `LLMRunner`
+protocol either way, so no agent code changes.
+
+Override per agent in `team.yaml` — a cheap local model for routine work, a
+stronger one for the critic:
+
+```yaml
+agents:
+  research:
+    entrypoint: app.agents.research
+  critic:
+    entrypoint: app.agents.critic
+    provider: anthropic
+    model: claude-opus-5
+```
+
 **It is not durable.** In-process mode dispatches sends immediately instead of
 handing them to Restate, so killing it loses the work. It exists for watching
 the choreography and developing agents. `make dev` is the durable path — same

@@ -21,6 +21,8 @@ durable = [
     "pydantic-ai>=0.0.1",
 ]
 postgres = ["psycopg[binary]>=3.2"]
+anthropic = ["anthropic>=1.0"]
+openai = ["openai>=1.60"]
 # Tracing degrades to an in-memory recorder without these, so the unit suite
 # never needs them. Console/file export needs no backend; the OTLP exporter is
 # only useful once someone runs Jaeger/Tempo/Grafana.

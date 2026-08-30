@@ -11,6 +11,7 @@ exposes both entrypoints:
 
 from __future__ import annotations
 
+import os
 import sys
 
 from app.config import Settings, load_settings
@@ -83,9 +84,12 @@ def run(settings: Settings, objective: str = "", *,
     import asyncio
 
     from app.local_runner import LocalRunner, drive
+    from app.runtime.llm import registry_from_settings
 
     objective = objective or "Evaluate whether Company X is attractive at its valuation."
     root = settings.artifact_root
+    llm = registry_from_settings(settings)
+    print(f"model: {llm.describe()}")
 
     async def _go() -> list[LocalRunner]:
         runners: list[LocalRunner] = []
@@ -101,7 +105,7 @@ def run(settings: Settings, objective: str = "", *,
 
             for directory in ("teams/investment", "teams/research"):
                 runner = LocalRunner(directory, repository=Repository.from_url("sqlite://"),
-                                     artifact_root=root, bus=bus,
+                                     artifact_root=root, llm=llm, bus=bus,
                                      session_id="workstation-01")
                 by_id[runner.team_id] = runner
                 registry.register(runner.spec.to_descriptor())
@@ -109,7 +113,7 @@ def run(settings: Settings, objective: str = "", *,
         else:
             runners.append(LocalRunner("teams/investment",
                                        repository=Repository.from_url("sqlite://"),
-                                       artifact_root=root))
+                                       artifact_root=root, llm=llm))
 
         head = runners[0]
         await head.kernel().send(
@@ -139,7 +143,40 @@ def run(settings: Settings, objective: str = "", *,
     print("Not durable — this ran in-process. Use `make dev` for the durable path.")
 
 
-COMMANDS = {"migrate": migrate, "web": web, "serve": serve, "run": run}
+def providers(settings: Settings) -> None:
+    """Show every LLM provider, whether it is usable here, and how to enable it."""
+    import shutil
+
+    from app.runtime.llm import PROVIDERS
+
+    print(f"configured: LLM_PROVIDER={settings.llm_provider}"
+          + (f"  LLM_MODEL={settings.llm_model}" if settings.llm_model else ""))
+    print()
+    print(f"  {'provider':<13}{'kind':<6}{'ready':<8}{'default model':<18}how")
+    for name in sorted(PROVIDERS):
+        spec = PROVIDERS[name]
+        if spec.kind == "stub":
+            ready, how = True, "always available"
+        elif spec.binary:
+            ready = shutil.which(spec.binary) is not None
+            how = f"needs {spec.binary!r} on PATH"
+        else:
+            try:
+                __import__(name)
+                ready = True
+            except ImportError:
+                ready = False
+            how = spec.install
+            if spec.needs_key and not os.environ.get(spec.needs_key):
+                how += f" + {spec.needs_key}"
+        print(f"  {name:<13}{spec.kind:<6}{'yes' if ready else 'no':<8}"
+              f"{spec.default_model or '-':<18}{how}")
+    print("\nSet LLM_PROVIDER in .env, or override per agent in team.yaml:")
+    print("  agents:\n    critic:\n      provider: anthropic\n      model: claude-opus-5")
+
+
+COMMANDS = {"migrate": migrate, "web": web, "serve": serve, "run": run,
+            "providers": providers}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -153,9 +190,20 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
 
     if command == "run":
-        flags = {a for a in rest if a.startswith("--")}
-        objective = " ".join(a for a in rest if not a.startswith("--"))
-        run(settings, objective,
+        flags = [a for a in rest if a.startswith("--")]
+        words: list[str] = []
+        skip = False
+        for index, token in enumerate(rest):
+            if skip:
+                skip = False
+                continue
+            if token == "--provider" and index + 1 < len(rest):
+                settings.llm_provider, skip = rest[index + 1], True
+            elif token == "--model" and index + 1 < len(rest):
+                settings.llm_model, skip = rest[index + 1], True
+            elif not token.startswith("--"):
+                words.append(token)
+        run(settings, " ".join(words),
             cross_team="--cross-team" in flags,
             decision="reject" if "--reject" in flags else "approve")
     else:

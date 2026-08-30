@@ -12,10 +12,11 @@ the whole point of the KernelContext seam.
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
-from app.agents.base import AgentContext, LLMRunner, StubLLMRunner, dispatch
+from app.agents.base import AgentContext, LLMRunner, dispatch
 from app.db.repository import Repository
 from app.kernel.artifacts import FilesystemArtifactStore
 from app.kernel.context import FakeKernelContext
@@ -23,13 +24,14 @@ from app.kernel.models import Task
 from app.kernel.runtime import Kernel
 from app.kernel.subscriptions import SubscriptionRegistry
 from app.kernel.team_spec import TeamSpec, load_team_spec
+from app.runtime.llm import LLMRegistry
 
 
 class LocalRunner:
     """One team, executed in this process."""
 
     def __init__(self, team_dir: str | Path, *, repository: Repository,
-                 artifact_root: Path, llm: LLMRunner | None = None,
+                 artifact_root: Path, llm: LLMRunner | LLMRegistry | None = None,
                  bus: Any = None, session_id: str = "local",
                  project_id: str | None = None) -> None:
         self.directory = Path(team_dir)
@@ -44,7 +46,7 @@ class LocalRunner:
 
         self.store = FilesystemArtifactStore(root=artifact_root / self.team_id)
         self.ctx = FakeKernelContext(key=self.project_id)
-        self.llm = llm or StubLLMRunner()
+        self.llm = llm if llm is not None else LLMRegistry(provider="stub")
         self.bus = bus
         self.session_id = session_id
 
@@ -55,8 +57,15 @@ class LocalRunner:
                       team_id=self.team_id, session_id=self.session_id,
                       public_topics=self.spec.public.topics)
 
-    def agent_context(self) -> AgentContext:
-        return AgentContext(kernel=self.kernel(), llm=self.llm,
+    def llm_for(self, agent: str) -> LLMRunner:
+        """Resolve this agent's model, honouring any team.yaml override."""
+        if not isinstance(self.llm, LLMRegistry):
+            return self.llm
+        provider, model = self.spec.llm_for(agent)
+        return self.llm.for_agent(provider, model)
+
+    def agent_context(self, agent: str = "") -> AgentContext:
+        return AgentContext(kernel=self.kernel(), llm=self.llm_for(agent),
                             prompts_dir=self.directory / "prompts")
 
     def inbound_task(self, send) -> Task:
@@ -91,16 +100,22 @@ class LocalRunner:
 
 
 async def drive(runners: list[LocalRunner], *, auto_approve: str | None = "approve",
-                rounds: int = 60, timeout: float = 60.0) -> None:
+                timeout: float = 900.0, poll: float = 0.05) -> None:
     """Dispatch queued sends across every team until the system goes quiet.
+
+    Waits on real in-flight work rather than spinning. A stubbed agent finishes
+    within one event-loop tick, so a naive ``sleep(0)`` loop looks correct until
+    a real model takes seconds — then it burns its rounds while work is still
+    in flight and returns a half-finished project.
 
     ``auto_approve`` answers any workflow that parks on a human. Pass None to
     leave it parked, which is what you want when driving approvals from the UI.
     """
     seen: set[int] = set()
     inflight: list[asyncio.Task] = []
+    deadline = time.monotonic() + timeout
 
-    for _ in range(rounds):
+    while True:
         progressed = False
         for runner in runners:
             for send in list(runner.ctx.sends):
@@ -109,21 +124,31 @@ async def drive(runners: list[LocalRunner], *, auto_approve: str | None = "appro
                 seen.add(id(send))
                 task = runner.materialise(send)
                 inflight.append(asyncio.create_task(
-                    dispatch(send.agent, runner.agent_context(), task,
+                    dispatch(send.agent, runner.agent_context(send.agent), task,
                              team=runner.team_id)))
                 progressed = True
-
-        await asyncio.sleep(0)
 
         if auto_approve is not None:
             for runner in runners:
                 for run in runner.repo.list_waiting_runs(runner.project_id):
                     runner.ctx.resolve_awakeable(run.awakeable_id,
                                                  {"decision": auto_approve})
+
+        pending = [t for t in inflight if not t.done()]
+        if not progressed and not pending:
+            break
+        if time.monotonic() > deadline:
+            raise TimeoutError(
+                f"team did not settle within {timeout}s; "
+                f"{len(pending)} invocation(s) still running")
+
+        if pending:
+            # Wake on the first completion, but time out so a workflow parked on
+            # a human is still noticed by the approval sweep above.
+            await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED,
+                               timeout=poll)
+        else:
             await asyncio.sleep(0)
 
-        if not progressed and all(t.done() for t in inflight):
-            break
-
     if inflight:
-        await asyncio.wait_for(asyncio.gather(*inflight), timeout=timeout)
+        await asyncio.gather(*inflight)
