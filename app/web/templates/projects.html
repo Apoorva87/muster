@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Projects — Muster{% endblock %}
+{% block crumb %}all projects{% endblock %}
+
+{% block content %}
+<style>
+.projects { list-style: none; margin: 0; padding: 0; }
+.project {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.project:last-child { border-bottom: 0; }
+.project:hover { background: var(--panel-2); }
+.project .name { font-weight: 600; flex: 1; }
+.project .count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+</style>
+
+<h1>Projects</h1>
+<p class="sub">Every project the runtime has recorded a run for.</p>
+
+<div class="card">
+{% if projects %}
+  <ul class="projects">
+  {% for project in projects %}
+    <li class="project">
+      <span class="name"><a href="/project/{{ project.id }}">{{ project.id }}</a></span>
+      {% if project.waiting %}<span class="pill s-waiting_for_human">{{ project.waiting }} waiting</span>{% endif %}
+      <span class="count">{{ project.runs|length }} run{{ '' if project.runs|length == 1 else 's' }}</span>
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">Nothing has run yet. Start the runtime and this page fills in.</p>
+{% endif %}
+</div>
+{% endblock %}

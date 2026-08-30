@@ -1,0 +1,73 @@
+# Muster — local install. Restate for distributed-systems semantics, Postgres
+# for canonical semantic state. Nothing else belongs here: Kubernetes, Kafka,
+# NATS, Redpanda and Redis-for-coordination are explicitly out of scope.
+#
+# Works on Docker Desktop (macOS/Windows) and on Docker Engine under WSL2.
+#
+# Restate facts verified Aug 2026 against docs.restate.dev/server/deploy/docker
+# and the image's own Dockerfile:
+#   8080  ingress  — client invocations              (RESTATE_INGRESS_URL)
+#   9070  admin    — deployment registration + UI    (RESTATE_ADMIN_URL)
+#   9071  node status / metrics
+#   5122  node-to-node metadata — single node here, kept off the host
+#   /restate-data  is the data directory
+#   GET :9070/health is the health endpoint (/cluster-health was removed in 1.7)
+#   the runtime image is debian-trixie-slim with curl and jq added for exactly
+#   this purpose, so the healthcheck below needs no extra tooling.
+#
+# Muster's own service is NOT containerised: it runs on the host under
+# `make dev` so you can edit and restart it without a rebuild. Restate reaches
+# it through host.docker.internal (see extra_hosts).
+
+name: muster
+
+services:
+  restate:
+    image: restatedev/restate:1.7.8
+    container_name: muster-restate
+    restart: unless-stopped
+    # A stable node name is what lets Restate re-adopt the volume after a
+    # restart instead of bootstrapping a fresh, empty node.
+    command: ["--node-name=muster-restate-1"]
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9070:9070"
+      - "127.0.0.1:9071:9071"
+    extra_hosts:
+      # Lets Restate invoke the Muster service running on the host. Docker
+      # Desktop resolves this name natively; `host-gateway` is what makes plain
+      # Docker Engine (WSL2, Linux) behave identically.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - restate-data:/restate-data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9070/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: muster-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-muster}
+      POSTGRES_USER: ${POSTGRES_USER:-muster}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      # Keeps index/collation behaviour identical across macOS and WSL2 hosts.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-muster} -d $${POSTGRES_DB:-muster}"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+volumes:
+  restate-data:
+  postgres-data:

@@ -84,6 +84,11 @@ Recorded in `docs/superpowers/specs/v1-runtime-decisions.md`. Do not relitigate 
 
 ## Working agreements
 
+- **Launch subagents whenever useful and possible.** Fan out genuinely independent
+  work — separate modules, separate test files, research spikes — to parallel agents
+  rather than doing it serially. Keep tightly-coupled foundational work inline, since
+  a cold agent re-deriving a shared interface costs more than it saves. Give each
+  agent the exact interface contract it must code against.
 - **Do fresh web lookups.** This stack moves fast; knowledge goes stale within months.
   Verify current library capabilities before designing around remembered APIs.
 - **Suggest better ideas.** If an approach in a PRD or in my own plan looks wrong, say so

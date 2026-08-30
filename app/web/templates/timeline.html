@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ project_id }} — Muster{% endblock %}
+{% block crumb %}
+  {% if projects|length > 1 %}<a href="/">all projects</a> /{% endif %} {{ project_id }}
+{% endblock %}
+
+{% block content %}
+<style>
+.timeline { list-style: none; margin: 0; padding: 0; }
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 74px 22px minmax(90px, 130px) 1fr auto auto auto;
+  align-items: center; gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--panel-2); }
+.row .time { color: var(--muted); }
+.rail { position: relative; align-self: stretch; display: flex; justify-content: center; }
+.rail::before {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rail);
+}
+.row:first-child .rail::before { top: 50%; }
+.row:last-child .rail::before { bottom: 50%; }
+.dot {
+  --tone: var(--idle);
+  position: relative; align-self: center;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--tone); box-shadow: 0 0 0 3px var(--panel);
+}
+.agent { font-weight: 600; }
+.event a { color: inherit; }
+.event a::after { content: ""; position: absolute; inset: 0; }
+.dur { color: var(--muted); font-variant-numeric: tabular-nums; }
+.actions { position: relative; z-index: 1; display: flex; gap: 6px; }
+.actions form { margin: 0; }
+@media (max-width: 720px) {
+  .row { grid-template-columns: 62px 18px 1fr auto; row-gap: 4px; }
+  .row .dur, .row .status { grid-column: 4; }
+}
+</style>
+
+<h1>{{ project_id }}</h1>
+<p class="sub">{{ runs|length }} run{{ '' if runs|length == 1 else 's' }} — newest at the bottom, in the order the runtime recorded them.</p>
+
+{% if waiting_count %}
+<div class="banner">
+  {{ waiting_count }} run{{ '' if waiting_count == 1 else 's' }} parked on a human decision.
+</div>
+{% endif %}
+
+<div class="card">
+{% if runs %}
+  <ul class="timeline">
+  {% for run in runs %}
+    {% set waiting = is_waiting(run) %}
+    <li class="row">
+      <span class="time mono">{{ run.started_at|clock }}</span>
+      <span class="rail"><span class="dot s-{{ run.status|lower }}"></span></span>
+      <span class="agent">{{ run.agent }}</span>
+      <span class="event mono"><a href="/run/{{ run.id }}">{{ run.event_type }}</a></span>
+      <span class="status"><span class="pill s-{{ run.status|lower }}">{{ run.status }}</span></span>
+      <span class="dur mono">{{ run|duration }}</span>
+      <span class="actions">
+      {% if waiting %}
+        <form method="post" action="/approve/{{ run.id }}"><button class="btn btn-approve" type="submit">Approve</button></form>
+        <form method="post" action="/reject/{{ run.id }}"><button class="btn btn-reject" type="submit">Reject</button></form>
+      {% endif %}
+      </span>
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">No runs recorded for this project yet.</p>
+{% endif %}
+</div>
+{% endblock %}

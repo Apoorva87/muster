@@ -31,3 +31,7 @@ restate-data/
 .worktrees/
 .firecrawl/
 .playwright-mcp/
+
+# uv
+.venv/
+uv.lock
