@@ -1,6 +1,8 @@
 """Buzz as a control plane: what reaches a human room, and what never does."""
 import pytest
 
+pytest.importorskip("coincurve", reason="Buzz needs the 'buzz' extra: uv sync --extra buzz")
+
 from app.kernel.models import RunRecord
 from bus.adapters.buzz import (NEVER_PROJECTED, SEMANTIC_TOPICS, is_semantic,
                                topic_for_run)
@@ -59,7 +61,13 @@ def test_internal_run_events_have_no_semantic_topic():
 def test_artifact_kinds_map_to_their_own_topics():
     assert topic_for_run("event.published", "proposal") == "proposal.ready"
     assert topic_for_run("event.published", "critique") == "critique.ready"
-    assert topic_for_run("event.published", "synthesis") == "decision.completed"
+    # A synthesis precedes the human decision, so it must NOT announce one.
+    assert topic_for_run("event.published", "synthesis") == "task.completed"
+
+
+def test_a_decision_is_never_announced_before_the_human_decides():
+    """The premature-decision bug: synthesis exists while the run is still parked."""
+    assert topic_for_run("event.published", "synthesis") != "decision.completed"
 
 
 async def test_a_filtered_run_is_never_posted(control, transport):

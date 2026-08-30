@@ -57,7 +57,6 @@ This module imports nothing from ``app/`` and nothing from ``bus/`` other than
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import secrets

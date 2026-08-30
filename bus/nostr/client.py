@@ -286,10 +286,12 @@ class NostrClient:
         try:
             return await self._publish_once(event, timeout)
         except RelayRejected as exc:
-            if not self._is_auth_required(exc.message) or self._authenticated:
+            if not self._is_auth_required(exc.message):
                 raise
             logger.info("relay wants auth before accepting %s; retrying",
                         event.id[:12])
+            # The challenge may still be in flight; wait for the handshake the
+            # reader is already running. Exactly one retry — never a loop.
             if not await self.wait_authenticated(timeout):
                 raise
             return await self._publish_once(event, timeout)

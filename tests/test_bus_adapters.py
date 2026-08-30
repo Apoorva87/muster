@@ -386,6 +386,7 @@ def test_buzz_projector_is_a_protocol_describing_the_seam():
 
 def test_buzz_is_implemented_and_lives_behind_the_allow_list():
     """The projection moved from deferred to live; the filter did not move."""
+    pytest.importorskip("coincurve", reason="needs the 'buzz' extra")
     from bus.adapters import buzz_live
     assert hasattr(buzz_live, "BuzzControlPlane")
     assert hasattr(buzz_live, "BuzzCommandListener")

@@ -60,7 +60,10 @@ RUN_EVENT_TO_TOPIC: dict[str, str] = {
 ARTIFACT_TO_TOPIC: dict[str, str] = {
     "proposal": "proposal.ready",
     "critique": "critique.ready",
-    "synthesis": "decision.completed",
+    # NOT decision.completed — a synthesis is written *before* the human is
+    # asked, so announcing a decision here would tell the room the call was
+    # made while the workflow is still parked waiting for it.
+    "synthesis": "task.completed",
 }
 
 

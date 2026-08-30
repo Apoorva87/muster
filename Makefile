@@ -55,6 +55,7 @@ help:
 	@echo "  make migrate           create the Postgres schema"
 	@echo "  make run               run a team in-process and print the timeline"
 	@echo "  make demo              two-team bus demo (no Docker)"
+	@echo "  make buzz-demo         drive a team from a Buzz chat room (no Docker)"
 	@echo "  make test              unit suite (no Docker, no Restate, no Postgres)"
 	@echo "  make test-integration  integration suite (needs 'make up' + 'make deps')"
 	@echo "  make logs / make ps    inspect the stack"
@@ -128,6 +129,15 @@ OBJECTIVE ?= Evaluate whether Company X is attractive at its current valuation.
 FLAGS ?=
 run:
 	$(UV) run python -m app.main run $(FLAGS) "$(OBJECTIVE)"
+
+# ------------------------------------------------------------------ buzz demo
+
+# Hands a team over to a Buzz room and drives it from chat. Runs a real
+# NIP-01/29/42 relay in-process, so this needs no Docker and no Buzz binary.
+# Point --relay at a real deployment to run the identical code path.
+BUZZ_FLAGS ?=
+buzz-demo:
+	$(UV) run --extra buzz python -m demo.buzz_session $(BUZZ_FLAGS)
 
 # ----------------------------------------------------------------------- demo
 
