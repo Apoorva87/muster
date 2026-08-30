@@ -213,3 +213,7 @@ Tell them:
   same agents and the same `team.yaml`;
 - to set the model per agent in `team.yaml` rather than globally, e.g. a cheap local
   model for routine work and a stronger one for the critic.
+
+Finally, offer the next step: **the `muster-buzz` skill** puts this team into a
+Buzz chat room, so projects start by someone typing `run <objective>` in a
+channel and approvals are answered there instead of in a CLI.
