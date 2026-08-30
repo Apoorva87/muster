@@ -1225,7 +1225,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-ai", marker = "extra == 'durable'", specifier = ">=0.0.1" },
     { name = "pydantic-settings", specifier = ">=2.5" },
-    { name = "restate-sdk", extras = ["serde"], marker = "extra == 'durable'", specifier = ">=0.5" },
+    { name = "restate-sdk", extras = ["serde"], marker = "extra == 'durable'", specifier = ">=1.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

@@ -16,7 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 # Kept out of the core install so unit tests never need the durable stack.
 durable = [
-    "restate-sdk[serde]>=0.5",
+    "restate-sdk[serde]>=1.0",
     "pydantic-ai>=0.0.1",
 ]
 postgres = ["psycopg[binary]>=3.2"]

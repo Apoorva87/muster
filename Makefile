@@ -113,8 +113,10 @@ dev: up migrate
 
 # ------------------------------------------------------------------- database
 
+# Creates the schema AND seeds the subscription table. Without the seed,
+# publish() resolves to zero subscribers and the demo silently does nothing.
 migrate:
-	$(UV) run --extra postgres python -c 'from app.db.repository import Repository; Repository.from_url("$(DATABASE_URL)").init_schema(); print("schema ready on $(POSTGRES_DB)")'
+	$(UV) run --extra postgres python -m app.main migrate
 
 # ---------------------------------------------------------------------- tests
 
