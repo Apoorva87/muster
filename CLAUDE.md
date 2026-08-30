@@ -57,6 +57,21 @@ team.yaml                                         # V3 declarative team contract
 Agent code calls the kernel, never Restate directly. Restate SDK types must not appear
 in any public signature — that is what lets V2 route across teams without rewriting agents.
 
+## Accepted design decisions
+
+Recorded in `docs/superpowers/specs/v1-runtime-decisions.md`. Do not relitigate silently.
+
+- Agents are Restate **Virtual Objects**, one object type **per agent**, keyed by `project_id`.
+  Objects serialize per key and run in parallel across keys, so `publish()` fan-out is
+  unaffected. Keying all agents by `project_id` alone would head-of-line block them — don't.
+- `publish()` must use `ctx.generic_send` (runtime string dispatch), not the typed
+  `ctx.object_send` — subscriber names come from the subscriptions table.
+- `wake_later()` is `ctx.object_send(..., send_delay=...)`. No timer code of our own.
+- `awakeable_id` is persisted on the run record from the **first** migration; the Approve
+  button cannot resume a workflow without it.
+- V2 `Effect` owns only the status machine and reconciliation, sitting on top of
+  `run_typed()` — it never wraps or replaces the durable step.
+
 ## Testing
 
 - **Every externally exposed feature needs unit tests.** No exceptions.
