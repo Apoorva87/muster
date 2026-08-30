@@ -77,7 +77,11 @@ class TeamHarness:
         if "kind" in payload:            # a bus envelope
             inner = payload.get("payload") or {}
             topic = payload.get("topic")
-            task_id = inner.get("task_id") or payload.get("task_id") or payload["id"]
+            # The MESSAGE id, deliberately — never the sender's task id.
+            # A team mints its own task; reusing the sender's collides with the
+            # sender's own record when both teams share a launch. The origin is
+            # preserved in `source` and `correlation_id` instead.
+            task_id = payload["id"]
             task_type = f"on:{topic}" if topic else inner.get("type", "handle")
             objective = inner.get("objective", "") or f"react to {topic}"
             input_refs = payload.get("artifact_refs") or {}

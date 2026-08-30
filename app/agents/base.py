@@ -101,6 +101,8 @@ class AgentContext:
         self._probes = probes or {}
         self._memory = memory or NullMemoryStore()
         self._recall_limit = recall_limit
+        #: Set by dispatch() for the duration of one handler call.
+        self._task: Task | None = None
 
     @property
     def project_id(self) -> str:
@@ -119,6 +121,8 @@ class AgentContext:
 
     async def publish(self, topic: str, payload: dict[str, Any] | None = None,
                       **kwargs: Any):
+        """Publish an event, carrying this task's id so ancestry survives."""
+        kwargs.setdefault("task_id", self._task.id if self._task else None)
         return await self._kernel.publish(topic=topic, payload=payload, **kwargs)
 
     async def wake_later(self, delay: timedelta, *, agent: str | None = None,
@@ -204,6 +208,21 @@ class AgentContext:
         fn = self._probes.get(name)
         return await fn() if fn else {"changed": False}
 
+    async def root_objective(self, task: Task) -> str:
+        """What this work is really about, walking past generated objectives.
+
+        A reaction task's objective is "React to <topic>". Recalling memory
+        with that as the query finds nothing useful, which is a silent failure
+        — the team simply never learns anything.
+        """
+        async def _read() -> str:
+            from app.kernel.lineage import meaningful_objective
+
+            return meaningful_objective(self._kernel.repository, task,
+                                        fallback=task.objective)
+
+        return await self._kernel.step(f"lineage:{task.id}", _read)
+
     async def project_tasks(self) -> list[Task]:
         """Selected small project state — not a transcript.
 
@@ -248,4 +267,8 @@ class AgentContext:
 async def dispatch(name: str, ctx: AgentContext, task: Task,
                    team: str = "") -> Any:
     """Entry point the Restate handler calls."""
-    return await get_agent(name, team)(ctx, task)
+    ctx._task = task
+    try:
+        return await get_agent(name, team)(ctx, task)
+    finally:
+        ctx._task = None

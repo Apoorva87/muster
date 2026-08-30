@@ -38,7 +38,8 @@ class LocalRunner:
                  project_id: str | None = None,
                  memory: MemoryStore | None = None,
                  memory_backend: str = "none",
-                 recall_limit: int = 3) -> None:
+                 recall_limit: int = 3,
+                 write_policy: str = "decisions") -> None:
         self.directory = Path(team_dir)
         self.spec: TeamSpec = load_team_spec(self.directory)
         self.spec.load_entrypoints()
@@ -60,6 +61,7 @@ class LocalRunner:
             backend=memory_backend, team_id=self.team_id,
             root=self.directory / "memory")
         self.recall_limit = recall_limit
+        self.write_policy = write_policy
 
     def kernel(self, ctx: FakeKernelContext | None = None) -> Kernel:
         return Kernel(ctx=ctx or self.ctx, repository=self.repo,
@@ -74,6 +76,22 @@ class LocalRunner:
             return self.llm
         provider, model = self.spec.llm_for(agent)
         return self.llm.for_agent(provider, model)
+
+    async def learn(self) -> list[Any]:
+        """Turn this project's decisions into memory, once.
+
+        A team-level policy rather than agent logic: whether a team writes at
+        all is configuration, and the director should not have to know about it.
+        Idempotent, so re-running a project does not duplicate notes.
+        """
+        if self.write_policy != "decisions":
+            return []
+
+        from app.memory.distil import distil_project
+
+        return await distil_project(self.project_id, repository=self.repo,
+                                    artifacts=self.store, memory=self.memory,
+                                    llm=None)
 
     def memory_for(self, agent: str) -> MemoryStore:
         """Narrow the team's memory to what this agent may do with it."""
@@ -98,7 +116,11 @@ class LocalRunner:
             inner = payload.get("payload") or {}
             topic = payload.get("topic")
             return Task(
-                id=inner.get("task_id") or payload.get("task_id") or payload["id"],
+                # The MESSAGE id, deliberately — never the sender's task id.
+                # A team mints its own task; reusing the sender's collides with
+                # the sender's own record when both teams share a launch. The
+                # origin is preserved in `source` and `correlation_id`.
+                id=payload["id"],
                 project_id=self.project_id,
                 type=f"on:{topic}" if topic else inner.get("type", "handle"),
                 objective=inner.get("objective") or f"react to {topic}",
@@ -171,3 +193,6 @@ async def drive(runners: list[LocalRunner], *, auto_approve: str | None = "appro
 
     if inflight:
         await asyncio.gather(*inflight)
+
+    for runner in runners:
+        await runner.learn()

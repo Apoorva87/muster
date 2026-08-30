@@ -7,6 +7,7 @@ Holds no transcript. Progress is inferred from persisted semantic state
 from __future__ import annotations
 
 from app.agents.base import AgentContext, agent
+from app.kernel.memory import MemoryKind
 from app.kernel.models import Task
 
 #: Both must land before a proposal can be assembled. Keyed on artifact *type*,
@@ -84,15 +85,23 @@ async def _maybe_propose(ctx: AgentContext, task: Task) -> dict:
     if not all(kind in by_type for kind in REQUIRED_INPUT_TYPES):
         return {"waiting_for": [k for k in REQUIRED_INPUT_TYPES if k not in by_type]}
 
+    # Ask memory what past decisions taught us. Explicit: nothing arrives
+    # unless the director asks, and what comes back are references.
+    objective = await ctx.root_objective(task)
+    lessons = await ctx.recall(objective,
+                               kinds=[MemoryKind.LESSON, MemoryKind.DECISION])
+    learned = ("\n\n## What we learned before\n\n"
+               + "\n".join(f"- {ref.render()}" for ref in lessons)) if lessons else ""
+
     proposal = await ctx.put_artifact(
         task=task, created_by="director", type="proposal",
         content="# Proposal\n\n" + "\n".join(
             f"- {kind} ({by_type[kind].created_by}): {by_type[kind].id}"
-            for kind in REQUIRED_INPUT_TYPES))
+            for kind in REQUIRED_INPUT_TYPES) + learned)
 
     # The critic receives the proposal by reference — not the reasoning behind it.
     await ctx.publish("proposal.ready", {"artifact_id": proposal.id})
-    return {"proposal": proposal.id}
+    return {"proposal": proposal.id, "recalled": [r.id for r in lessons]}
 
 
 async def _synthesize(ctx: AgentContext, task: Task) -> dict:

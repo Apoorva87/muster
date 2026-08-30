@@ -141,7 +141,7 @@ def find_decisions(repository: Repository, project_id: str) -> list[Decision]:
             note=_clean(run.output_refs.get("note")),
             proposal_id=proposal_id,
             critique_id=critique_id,
-            objective=_objective(run, task),
+            objective=_objective(run, task, repository),
         ))
     return decisions
 
@@ -153,13 +153,25 @@ def normalise_verdict(value: object) -> str | None:
     return VERDICTS.get(value.strip().lower())
 
 
-def _objective(run: RunRecord, task: Task | None) -> str:
-    """What the decision was about. The task's objective is a command, not
-    reasoning, so it is safe to carry; the approval prompt is the fallback."""
-    if task is not None:
-        return task.objective
+def _objective(run: RunRecord, task: Task | None,
+                repository: Repository | None = None) -> str:
+    """What the decision was about — the objective a human wrote.
+
+    Shares one lineage walk with the agent layer (app/kernel/lineage.py); two
+    definitions drifting is how a note gets filed under the wrong subject.
+    """
+    from app.kernel.lineage import is_generated, meaningful_objective
+
+    if repository is not None and task is not None:
+        found = meaningful_objective(repository, task)
+        if not is_generated(found):
+            return found
+
+    if task is not None and not is_generated(task.objective):
+        return task.objective.strip()
+
     prompt = run.input_refs.get("prompt")
-    return prompt if isinstance(prompt, str) else ""
+    return prompt if isinstance(prompt, str) else (task.objective if task else "")
 
 
 def _judged_artifacts(run: RunRecord, task: Task | None,

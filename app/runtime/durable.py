@@ -235,7 +235,10 @@ class TeamDeps:
             inner = payload.get("payload") or {}
             topic = payload.get("topic")
             return Task(
-                id=inner.get("task_id") or payload.get("task_id") or payload["id"],
+                # The MESSAGE id — a team mints its own task rather than
+                # reusing the sender's, which would collide with the sender's
+                # own record. Origin survives in source/correlation_id.
+                id=payload["id"],
                 project_id=project_id,
                 type=f"on:{topic}" if topic else inner.get("type", "handle"),
                 objective=inner.get("objective") or f"react to {topic}",

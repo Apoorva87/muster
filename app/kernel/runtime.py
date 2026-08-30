@@ -198,6 +198,11 @@ class Kernel:
                 agent=agent,
                 task=f"on:{topic}",
                 objective=f"React to {topic}",
+                # Ancestry, so a delivered event still knows what work it came
+                # from. Without it every fan-out task is an orphan and anything
+                # reasoning over lineage — context scoping, memory subjects —
+                # sees "React to <topic>" instead of the objective a human wrote.
+                parent_task_id=task_id,
                 payload={"event_id": event.id, "topic": topic, **(payload or {})},
                 input_refs={k: v for k, v in (payload or {}).items()
                             if isinstance(v, str) and v.startswith("art_")},
