@@ -166,6 +166,11 @@ async def test_recall_respects_kinds(store):
     assert all(h.kind is MemoryKind.DECISION for h in hits)
 
 
+async def test_recall_with_an_empty_kinds_list_searches_nothing(store):
+    await seed(store)
+    assert await store.recall("peer", kinds=[]) == []
+
+
 async def test_recall_ranks_a_subject_match_above_a_body_match(store):
     await store.remember(kind=MemoryKind.LESSON, subject="unrelated-heading",
                          summary="The team should watch dilution closely.",

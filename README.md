@@ -22,7 +22,7 @@ one bus session, with the whole suite runnable on a laptop with no Docker.
 | V1 | Local durable agent runtime — one team | built | [PRD](docs/prd/v1-local-durable-runtime.md) · [plan](docs/superpowers/plans/2026-08-30-v1-local-durable-runtime.md) · [decisions](docs/superpowers/specs/v1-runtime-decisions.md) |
 | V2 | Multi-team bus, addressing, effects, tracing | built | [PRD](docs/prd/v2-multi-team-bus.md) |
 | V3 | `team.yaml` + template for any custom team | built | [PRD](docs/prd/v3-custom-teams.md) |
-| V4 | Per-team memory as markdown; teams learn across projects | **spec only** | [PRD](docs/prd/v4-team-memory.md) |
+| V4 | Per-team memory as markdown; teams learn across projects | building | [PRD](docs/prd/v4-team-memory.md) |
 
 A2A and Buzz ship as **interfaces only**, which both PRDs explicitly permit.
 
@@ -175,6 +175,53 @@ when the team declares it public, so team-local chatter stays local.
 
 Cross-team artifacts travel **by reference**: the receiving team registers the
 ID, and the bytes stay with the team that produced them.
+
+## Team memory
+
+Each team keeps a memory of markdown files in its own repository, so it improves
+across projects instead of starting cold.
+
+```bash
+uv run python -m app.main memory investment    # what the team has learned
+```
+
+```text
+teams/investment/memory/
+├── lessons/     what worked, what did not, and why
+├── domain/      durable facts about the subject matter
+├── decisions/   approvals and rejections, with the reasoning
+└── entities/    recurring subjects the team keeps meeting
+```
+
+**Markdown is canonical; any index is derived and disposable.** Delete the
+index, rebuild it, lose nothing. A wrong memory is a bug — findable with
+`grep`, fixable in an editor, revertible with `git`. That is the whole reason
+for choosing files over embeddings-as-truth.
+
+**Memory is retrieved explicitly, never injected.** An agent calls
+`ctx.recall(...)` and gets *references*; the note body is loaded only by an
+explicit `ctx.load_memory(ref)`, exactly as artifacts work. An uninvited memory
+would be a shared transcript by another name, which is what this architecture
+exists to prevent.
+
+| `MEMORY_BACKEND` | Needs |
+|---|---|
+| `filesystem` | nothing. Markdown + lexical search. The default |
+| `gbrain` | the `gbrain` CLI ([GBrain](https://github.com/garrytan/gbrain), TypeScript/Bun); degrades to lexical search if absent |
+| `none` | nothing. The team behaves exactly as it did in V3 |
+
+Per-agent permissions in `team.yaml` — a critic that remembers past objections
+is useful; a research agent accumulating opinions usually is not:
+
+```yaml
+agents:
+  critic:
+    entrypoint: app.agents.critic
+    memory: read-write
+  research:
+    entrypoint: app.agents.research
+    memory: off
+```
 
 ## Creating a team
 

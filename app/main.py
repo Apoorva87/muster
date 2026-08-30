@@ -7,6 +7,7 @@ exposes both entrypoints:
     uv run python -m app.main web       # local timeline + approvals
     uv run python -m app.main serve     # Restate agent service (needs [durable])
     uv run python -m app.main run "..." # run the team here and now, no Docker
+    uv run python -m app.main memory    # what the team has learned
 """
 
 from __future__ import annotations
@@ -106,14 +107,18 @@ def run(settings: Settings, objective: str = "", *,
             for directory in ("teams/investment", "teams/research"):
                 runner = LocalRunner(directory, repository=Repository.from_url("sqlite://"),
                                      artifact_root=root, llm=llm, bus=bus,
-                                     session_id="workstation-01")
+                                     session_id="workstation-01",
+                                     memory_backend=settings.memory_backend,
+                                     recall_limit=settings.memory_recall_limit)
                 by_id[runner.team_id] = runner
                 registry.register(runner.spec.to_descriptor())
                 runners.append(runner)
         else:
             runners.append(LocalRunner("teams/investment",
                                        repository=Repository.from_url("sqlite://"),
-                                       artifact_root=root, llm=llm))
+                                       artifact_root=root, llm=llm,
+                                       memory_backend=settings.memory_backend,
+                                       recall_limit=settings.memory_recall_limit))
 
         head = runners[0]
         await head.kernel().send(
@@ -141,6 +146,37 @@ def run(settings: Settings, objective: str = "", *,
 
     print("\n(* = reference to another team's artifact; body stays with its owner)")
     print("Not durable — this ran in-process. Use `make dev` for the durable path.")
+
+
+def memory(settings: Settings, team: str = "") -> None:
+    """Show what a team has learned. Memory is files — this just reads them."""
+    import asyncio
+
+    from app.memory import store_from_settings
+
+    team_id = team or settings.team_id
+    root = settings.memory_root_for(team_id)
+    print(f"backend: {settings.memory_backend}   team: {team_id}   root: {root}")
+
+    if settings.memory_backend == "none":
+        print("\nmemory is disabled (MEMORY_BACKEND=none)")
+        return
+    if not root.exists():
+        print(f"\nno memory yet — {root} does not exist")
+        return
+
+    store = store_from_settings(settings, team_id)
+
+    async def _show() -> None:
+        count = await store.rebuild_index()
+        notes = await store.recall("", limit=50)
+        print(f"\n{count} note(s):\n")
+        for ref in notes:
+            print(f"  {ref.render()}")
+        print(f"\nThese are markdown files under {root} — read, edit or revert "
+              f"them with git.")
+
+    asyncio.run(_show())
 
 
 def providers(settings: Settings) -> None:
@@ -176,7 +212,7 @@ def providers(settings: Settings) -> None:
 
 
 COMMANDS = {"migrate": migrate, "web": web, "serve": serve, "run": run,
-            "providers": providers}
+            "providers": providers, "memory": memory}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,11 +237,15 @@ def main(argv: list[str] | None = None) -> int:
                 settings.llm_provider, skip = rest[index + 1], True
             elif token == "--model" and index + 1 < len(rest):
                 settings.llm_model, skip = rest[index + 1], True
+            elif token == "--memory" and index + 1 < len(rest):
+                settings.memory_backend, skip = rest[index + 1], True
             elif not token.startswith("--"):
                 words.append(token)
         run(settings, " ".join(words),
             cross_team="--cross-team" in flags,
             decision="reject" if "--reject" in flags else "approve")
+    elif command == "memory":
+        memory(settings, rest[0] if rest else "")
     else:
         COMMANDS[command](settings)
     return 0

@@ -222,7 +222,7 @@ class FilesystemMemoryStore:
     def _iter_notes(self, kinds: list[MemoryKind] | None = None,
                     ) -> Iterator[tuple[Path, MemoryNote]]:
         """Every readable note under the root, malformed files skipped."""
-        for kind in kinds or list(MemoryKind):
+        for kind in (list(MemoryKind) if kinds is None else kinds):
             directory = self._directory_for(kind)
             for path in sorted(directory.glob("*.md")):
                 note = self._read(path)
