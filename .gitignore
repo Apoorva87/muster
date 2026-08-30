@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Runtime data
+data/artifacts/
+logs/
+*.db
+*.sqlite3
+
+# Restate local state
+restate-data/
+
+# OS
+.DS_Store
+
+# Superpowers / agent tooling
+.superpowers/
+.worktrees/
+.firecrawl/
+.playwright-mcp/
