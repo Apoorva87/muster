@@ -53,6 +53,7 @@ help:
 	@echo "  make serve             run the Muster service in the foreground"
 	@echo "  make register          register the running service with Restate"
 	@echo "  make migrate           create the Postgres schema"
+	@echo "  make run               run a team in-process and print the timeline"
 	@echo "  make demo              two-team bus demo (no Docker)"
 	@echo "  make test              unit suite (no Docker, no Restate, no Postgres)"
 	@echo "  make test-integration  integration suite (needs 'make up' + 'make deps')"
@@ -118,6 +119,15 @@ dev: up migrate
 # publish() resolves to zero subscribers and the demo silently does nothing.
 migrate:
 	$(UV) run --extra postgres python -m app.main migrate
+
+# ------------------------------------------------------------------ local run
+
+# Runs the investment team here and now. OBJECTIVE and FLAGS are overridable:
+#   make run FLAGS=--cross-team OBJECTIVE="Is Acme cheap?"
+OBJECTIVE ?= Evaluate whether Company X is attractive at its current valuation.
+FLAGS ?=
+run:
+	$(UV) run python -m app.main run $(FLAGS) "$(OBJECTIVE)"
 
 # ----------------------------------------------------------------------- demo
 

@@ -32,7 +32,17 @@ Requires [uv](https://docs.astral.sh/uv/) and Docker (Desktop, or Engine under W
 ```bash
 git clone https://github.com/Apoorva87/muster.git && cd muster
 ./setup.sh
+uv run python -m app.main run "Evaluate whether Acme Corp is attractive at 31x."
 ```
+
+That last command runs a whole team in-process and prints the timeline — no
+Docker, no Postgres, no model endpoint. Add `--cross-team` to run two teams
+over the bus, `--reject` to take the rejection path.
+
+**It is not durable.** In-process mode dispatches sends immediately instead of
+handing them to Restate, so killing it loses the work. It exists for watching
+the choreography and developing agents. `make dev` is the durable path — same
+agents, same `team.yaml`, only the `KernelContext` differs.
 
 That installs the toolchain, dependencies and `.env`, then runs the 174-test
 suite to prove it worked. It needs no Docker and no model endpoint — the LLM

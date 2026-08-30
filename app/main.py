@@ -6,6 +6,7 @@ exposes both entrypoints:
     uv run python -m app.main migrate   # create schema + seed subscriptions
     uv run python -m app.main web       # local timeline + approvals
     uv run python -m app.main serve     # Restate agent service (needs [durable])
+    uv run python -m app.main run "..." # run the team here and now, no Docker
 """
 
 from __future__ import annotations
@@ -71,15 +72,94 @@ def serve(settings: Settings) -> None:
     serve_durable(settings)
 
 
-COMMANDS = {"migrate": migrate, "web": web, "serve": serve}
+def run(settings: Settings, objective: str = "", *,
+        cross_team: bool = False, decision: str = "approve") -> None:
+    """Execute a project in this process and print the timeline.
+
+    No Restate, no Postgres, no Docker. Not durable — this is the path for
+    watching the choreography and developing agents. `make dev` is the durable
+    one; the agents and team.yaml are identical either way.
+    """
+    import asyncio
+
+    from app.local_runner import LocalRunner, drive
+
+    objective = objective or "Evaluate whether Company X is attractive at its valuation."
+    root = settings.artifact_root
+
+    async def _go() -> list[LocalRunner]:
+        runners: list[LocalRunner] = []
+        bus = None
+
+        if cross_team:
+            from bus.adapters.restate import RestateBusAdapter
+            from bus.routing.registry import TeamRegistry
+
+            registry = TeamRegistry(session_id="workstation-01")
+            by_id: dict[str, LocalRunner] = {}
+            bus = RestateBusAdapter(registry, lambda t: by_id[t].ctx)
+
+            for directory in ("teams/investment", "teams/research"):
+                runner = LocalRunner(directory, repository=Repository.from_url("sqlite://"),
+                                     artifact_root=root, bus=bus,
+                                     session_id="workstation-01")
+                by_id[runner.team_id] = runner
+                registry.register(runner.spec.to_descriptor())
+                runners.append(runner)
+        else:
+            runners.append(LocalRunner("teams/investment",
+                                       repository=Repository.from_url("sqlite://"),
+                                       artifact_root=root))
+
+        head = runners[0]
+        await head.kernel().send(
+            agent="director",
+            task="evaluate_company_delegated" if cross_team else "evaluate_company",
+            objective=objective)
+        await drive(runners, auto_approve=decision)
+        return runners
+
+    runners = asyncio.run(_go())
+
+    for runner in runners:
+        runs = runner.repo.list_runs(runner.project_id)
+        print(f"\n=== {runner.team_id} ({len(runs)} runs) ===")
+        for record in runs:
+            duration = f"{record.duration_ms}ms" if record.duration_ms is not None else "-"
+            print(f"  {record.started_at:%H:%M:%S}  {record.agent:<14} "
+                  f"{record.event_type:<20} {record.status:<18} {duration}")
+
+        artifacts = runner.repo.list_artifacts(runner.project_id)
+        if artifacts:
+            print(f"  artifacts: " + ", ".join(
+                f"{a.type}/{a.created_by}" + ("*" if a.meta.get("external") else "")
+                for a in artifacts))
+
+    print("\n(* = reference to another team's artifact; body stays with its owner)")
+    print("Not durable — this ran in-process. Use `make dev` for the durable path.")
+
+
+COMMANDS = {"migrate": migrate, "web": web, "serve": serve, "run": run}
 
 
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if not args or args[0] not in COMMANDS:
-        print(f"usage: python -m app.main [{'|'.join(COMMANDS)}]", file=sys.stderr)
+        print(f"usage: python -m app.main [{'|'.join(COMMANDS)}] [objective] "
+              "[--cross-team] [--reject]", file=sys.stderr)
         return 2
-    COMMANDS[args[0]](load_settings())
+
+    command, rest = args[0], args[1:]
+    settings = load_settings()
+
+    if command == "run":
+        flags = {a for a in rest if a.startswith("--")}
+        objective = " ".join(a for a in rest if not a.startswith("--"))
+        run(settings, objective,
+            cross_team="--cross-team" in flags,
+            decision="reject" if "--reject" in flags else "approve")
+    else:
+        COMMANDS[command](settings)
     return 0
 
 
