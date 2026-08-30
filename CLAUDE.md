@@ -1,0 +1,84 @@
+# CLAUDE.md — Muster
+
+Muster is a local-first durable runtime for **ensembles of agents** that work and
+communicate. Read `docs/prd/v1-local-durable-runtime.md` before touching kernel code;
+V2/V3 PRDs sit beside it and define the seams V1 must leave open.
+
+## Prime directive
+
+> **Our code describes agent semantics. Restate handles distributed-systems semantics.**
+
+We never build a scheduler, retry engine, actor runtime, broker, lease manager, or
+shared-chat memory. If a problem is "distributed systems", it is Restate's job.
+
+## Design principles
+
+1. **Do not reinvent.** Before writing infrastructure, check whether a maintained
+   library already does it. Prefer boring, widely-used dependencies over clever ones.
+2. **Minimal surface.** Muster *exposes* ensemble functionality; internals stay small.
+   If `kernel/` starts becoming a framework before the demo works, stop and simplify.
+3. **Structured, obvious internals.** One module, one job. No cleverness that needs a
+   paragraph to explain. A new reader should trace a request end-to-end in one sitting.
+4. **Never break the public surface.** Anything documented as a feature is a contract.
+   Changing it needs a deliberate decision, not a refactor side effect.
+5. **Agents are separate minds.** Bounded reconstructed context, never a shared
+   transcript. Large outputs become artifacts passed by reference.
+6. **LLMs reason; deterministic code routes.** No LLM polling loops, ever.
+
+## Already solved upstream — use, don't rebuild
+
+Verified Aug 2026; re-check versions before relying on specifics.
+
+| Need | Use |
+|---|---|
+| Durable agent execution | `restate.ext.pydantic.RestateAgent` wrapping a `pydantic_ai.Agent` |
+| Human pause/resume (approve/reject) | `restate_context().awakeable(type_hint=...)` |
+| Durable timer / `wake_later` | `restate_context().sleep(timedelta(...))` + `restate.select()` |
+| Side-effect dedup, idempotent steps | `restate_context().run_typed(...)` |
+| Per-session/keyed agent state | Restate **Virtual Objects** (journal dedups tool calls) |
+
+Install: `uv add restate_sdk[serde] pydantic-ai`
+
+Muster's own job is therefore only: kernel agent semantics (`send`/`publish`/
+`wake_later`/`subscribe`), the subscription router, Postgres semantic state, the
+artifact store, the context builder, the timeline UI, and the `BusAdapter` seam.
+
+## Public surface (treat as contract)
+
+```python
+await send(agent=..., task=..., payload=...)      # targeted command
+await publish(topic=..., payload=...)             # logical fan-out
+await wake_later(agent=..., delay=..., payload=...)  # durable future call
+ctx.artifacts.put / ctx.artifacts.get             # artifacts by reference
+BusAdapter                                        # V2 seam — no Restate types leak through
+team.yaml                                         # V3 declarative team contract
+```
+
+Agent code calls the kernel, never Restate directly. Restate SDK types must not appear
+in any public signature — that is what lets V2 route across teams without rewriting agents.
+
+## Testing
+
+- **Every externally exposed feature needs unit tests.** No exceptions.
+- Each kernel primitive gets a test named for it (`test_send`, `test_publish`, `test_timer`).
+- Context isolation is a tested property, not a convention: assert that an agent's built
+  context contains no unrelated transcript or another agent's scratchpad.
+- Crash recovery is a **release criterion**, not a demo: kill the process mid-workflow,
+  restart, assert durable intent survived and committed steps did not re-run.
+- Run tests before claiming anything works. Evidence before assertions.
+
+## Working agreements
+
+- **Do fresh web lookups.** This stack moves fast; knowledge goes stale within months.
+  Verify current library capabilities before designing around remembered APIs.
+- **Suggest better ideas.** If an approach in a PRD or in my own plan looks wrong, say so
+  with the reason before building it. Silent compliance on a bad design is not helpful.
+- PRDs in `docs/prd/` are the authored source of record — keep them verbatim. They use
+  working names (`agent-team`, `agent-bus`); the README carries the map to real repo names.
+- Plans go in `docs/superpowers/plans/`, specs in `docs/superpowers/specs/`.
+
+## Explicitly out of scope (V1/V2)
+
+Kubernetes, Kafka, NATS, Redpanda, Redis-for-coordination, Temporal, DBOS, vector DB as
+canonical state, Prometheus/Grafana/Tempo/Loki. Adding a broker requires a measured
+justification against the V2 PRD's decision gate.
