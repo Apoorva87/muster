@@ -1,0 +1,104 @@
+{% extends "shell.html" %}
+{% block title %}{{ team.team_id }} — Muster{% endblock %}
+{% block crumb %}<a href="/">bus session</a> / {{ team.team_id }}{% endblock %}
+
+{% block bus %}
+<h1>
+  {{ team.team_id }}
+  <span class="pill h-{{ health }}">{{ health }}</span>
+</h1>
+<p class="sub">
+  {% if team.description %}{{ team.description }} — {% endif %}
+  v{{ team.version }}, registered {{ team.registered_at|stamp }}.
+  {{ counts.running }} running, {{ counts.waiting }} waiting,
+  {{ counts.runs }} run{{ '' if counts.runs == 1 else 's' }} recorded.
+</p>
+
+{% if counts.waiting %}
+<div class="banner">
+  {{ counts.waiting }} run{{ '' if counts.waiting == 1 else 's' }} parked on a human decision.
+</div>
+{% endif %}
+
+<h2>Agents</h2>
+<div class="card">
+{% if team.agents %}
+  <ul class="rows">
+  {% for agent in team.agents %}
+    <li>
+      <span class="name">{{ agent.name }}</span>
+      <span class="tags grow">
+      {% for capability in agent.capabilities %}
+        <span class="tag mono">{{ capability }}</span>
+      {% else %}
+        <span class="count">no declared capabilities</span>
+      {% endfor %}
+      </span>
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">This team registered no agents.</p>
+{% endif %}
+</div>
+
+<h2>Subscriptions</h2>
+<div class="card">
+{% if team.subscriptions %}
+  <ul class="rows">
+  {% for topic, agent in team.subscriptions %}
+    <li>
+      <span class="mono grow"><a href="/topics">{{ topic }}</a></span>
+      <span class="count">→</span>
+      <span class="name">{{ agent }}</span>
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">This team subscribes to nothing.</p>
+{% endif %}
+</div>
+
+<h2>Public topics</h2>
+<div class="card">
+{% if team.public_topics %}
+  <ul class="rows">
+  {% for topic in team.public_topics %}
+    <li><span class="mono grow">{{ topic }}</span></li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">This team publishes no topics onto the bus.</p>
+{% endif %}
+</div>
+
+<h2>Public commands</h2>
+<div class="card">
+{% if team.public_commands %}
+  <ul class="rows">
+  {% for command in team.public_commands %}
+    <li><span class="mono grow">{{ command }}</span></li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">This team accepts no cross-team commands.</p>
+{% endif %}
+</div>
+
+<h2>Timeline</h2>
+<div class="card">
+  <ul class="rows">
+  {% for project in projects %}
+    <li>
+      <span class="name grow">
+        <a href="{{ timeline_url(project.id) }}">{{ project.id }}</a>
+      </span>
+      {% if project.waiting %}
+        <span class="pill s-waiting_for_human">{{ project.waiting }} waiting</span>
+      {% endif %}
+      <span class="count">{{ project.runs|length }} run{{ '' if project.runs|length == 1 else 's' }}</span>
+    </li>
+  {% endfor %}
+  </ul>
+</div>
+{% endblock %}

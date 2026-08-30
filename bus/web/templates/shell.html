@@ -1,0 +1,50 @@
+{# Every bus page hangs off V1's base.html, so the design tokens, the status
+   pills and the prefers-color-scheme handling are shared, not copied. The only
+   thing added here is the health vocabulary, which follows base.html's own
+   `--tone` convention. Scoped <style> in the content block is the pattern V1's
+   own templates already use. #}
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+/* health tones, in the same shape as base.html's .s-* status vocabulary */
+.h-healthy     { --tone: var(--ok); }
+.h-degraded    { --tone: var(--wait); }
+.h-unreachable { --tone: var(--fail); }
+
+.dot {
+  --tone: var(--idle);
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--tone); flex: none;
+}
+.busnav { display: flex; gap: 16px; font-size: 13px; margin: -8px 0 18px; }
+.busnav a.here { color: var(--text); font-weight: 600; }
+.busnav a.here:hover { text-decoration: none; cursor: default; }
+
+.rows { list-style: none; margin: 0; padding: 0; }
+.rows > li {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 18px; border-bottom: 1px solid var(--line);
+}
+.rows > li:last-child { border-bottom: 0; }
+.rows > li:hover { background: var(--panel-2); }
+.name { font-weight: 600; }
+.grow { flex: 1; min-width: 0; }
+.count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--muted); font-size: 11.5px;
+}
+.wire { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wire .to { color: var(--muted); }
+</style>
+
+<nav class="busnav">
+  <a href="/" class="{{ 'here' if nav == 'session' }}">bus session</a>
+  <a href="/topics" class="{{ 'here' if nav == 'topics' }}">routing table</a>
+</nav>
+
+{% block bus %}{% endblock %}
+{% endblock %}

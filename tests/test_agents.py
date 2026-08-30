@@ -30,7 +30,10 @@ def make_task(agent_name, type_, objective="Evaluate Company X", **kw):
 
 
 def test_all_prd_agents_are_registered():
-    assert registered_agents() == ["critic", "director", "finance", "monitor", "research"]
+    """The investment team's agents register unscoped, so V1 code reaches them
+    by bare name. Other teams register under their own scope."""
+    assert set(registered_agents(team="")) == {
+        "critic", "director", "finance", "monitor", "research"}
 
 
 async def test_unknown_agent_raises_a_useful_error(agent_ctx):
@@ -73,7 +76,7 @@ async def test_director_waits_until_both_inputs_land(agent_ctx, repo, store):
                                 path="/x.md", created_by="research"))
     result = await dispatch("director", agent_ctx,
                             make_task("director", "on:research.complete"))
-    assert result == {"waiting_for": ["finance"]}
+    assert result == {"waiting_for": ["valuation"]}
 
 
 async def test_director_publishes_proposal_once_both_land(agent_ctx, repo):

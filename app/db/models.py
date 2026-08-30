@@ -29,6 +29,8 @@ class TaskRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     parent_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_refs: Mapped[dict] = mapped_column(JSON, default=dict)
+    source: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 class EventRow(Base):

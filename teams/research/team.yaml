@@ -1,0 +1,18 @@
+# A second, independently defined team. Built from template/ and sharing the
+# same runtime — it declares one useful capability and nothing more.
+team:
+  id: research
+  version: 1
+  description: Standalone research helper exposing one capability
+
+agents:
+  web-researcher:
+    entrypoint: teams.research.agents.web_researcher
+    capabilities: [research_company, web_search]
+
+subscriptions:
+  - {topic: research.requested, agent: web-researcher}
+
+public:
+  commands: [research_company]
+  topics: [research.report.ready]

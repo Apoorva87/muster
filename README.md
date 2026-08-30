@@ -14,15 +14,16 @@ never a shared transcript.
 
 ## Status
 
-**V1 implemented.** The kernel, agents, artifacts, persistence, timeline UI and
-the full Day-1 demo choreography are built and tested. See
-[`docs/prd/v1-local-durable-runtime.md`](docs/prd/v1-local-durable-runtime.md).
+**V1, V2 and V3 implemented.** Two independently defined teams coordinate over
+one bus session, with the whole suite runnable on a laptop with no Docker.
 
-| Stage | Scope | Doc |
-|---|---|---|
-| V1 | Local durable agent runtime — one team, one laptop | [PRD](docs/prd/v1-local-durable-runtime.md) · [plan](docs/superpowers/plans/2026-08-30-v1-local-durable-runtime.md) · [decisions](docs/superpowers/specs/v1-runtime-decisions.md) |
-| V2 | Multi-team bus, addressing, effects, tracing | [PRD](docs/prd/v2-multi-team-bus.md) |
-| V3 | Template + recipe for building any custom team | [PRD](docs/prd/v3-custom-teams.md) |
+| Stage | Scope | Status | Doc |
+|---|---|---|---|
+| V1 | Local durable agent runtime — one team | built | [PRD](docs/prd/v1-local-durable-runtime.md) · [plan](docs/superpowers/plans/2026-08-30-v1-local-durable-runtime.md) · [decisions](docs/superpowers/specs/v1-runtime-decisions.md) |
+| V2 | Multi-team bus, addressing, effects, tracing | built | [PRD](docs/prd/v2-multi-team-bus.md) |
+| V3 | `team.yaml` + template for any custom team | built | [PRD](docs/prd/v3-custom-teams.md) |
+
+A2A and Buzz ship as **interfaces only**, which both PRDs explicitly permit.
 
 ## Quick start
 
@@ -74,6 +75,9 @@ uv run pytest -m integration      # needs `make up` first
 | `test_human_resume` | a workflow parks on a human and resumes from a button |
 | `test_crash_recovery` | durable intent survives losing every in-memory object |
 | `test_demo_flow` | the PRD's whole Day-1 choreography, end to end |
+| `test_two_team_demo` | two teams, one bus session, cross-team command and event |
+| `test_team_spec` | `team.yaml` validates, loads, and projects to the bus |
+| `test_effects` | reconcile-before-retry; replay protection ≠ exactly-once |
 
 ## Architecture
 
@@ -90,6 +94,34 @@ Agents are Restate **Virtual Objects**, one object type per agent, each keyed by
 `project_id`. Objects serialize per key and run in parallel across keys, so a
 `publish()` to N subscribers wakes N distinct objects concurrently, while two
 events for the *same* agent queue in order.
+
+### Multiple teams
+
+```text
+teams/investment/team.yaml  ─┐
+                             ├─→ TeamRegistry ─→ RestateBusAdapter ─→ KernelContext
+teams/research/team.yaml    ─┘
+```
+
+A team is `team.yaml` + prompts + agents. `ctx.send("finance", ...)` stays
+local; `ctx.send("team://research/web-researcher", ...)` routes over the bus —
+the agent code is identical either way. A topic crosses a team boundary only
+when the team declares it public, so team-local chatter stays local.
+
+Cross-team artifacts travel **by reference**: the receiving team registers the
+ID, and the bytes stay with the team that produced them.
+
+## Creating a team
+
+```bash
+cp -r template myteam        # edit team.yaml, agents/, prompts/
+uv run pytest myteam/tests
+```
+
+You should never need to edit Restate internals, retry logic, durable timers,
+bus routing, the artifact backend, task/event schemas, human-resume plumbing or
+tracing. If a new team routinely does, the abstraction is wrong and gets fixed
+centrally — see `template/README.md`.
 
 ## Why "Muster"
 

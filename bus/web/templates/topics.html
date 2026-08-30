@@ -1,0 +1,46 @@
+{% extends "shell.html" %}
+{% block title %}Routing table — Muster{% endblock %}
+{% block crumb %}<a href="/">bus session</a> / routing table{% endblock %}
+
+{% block bus %}
+<h1>Routing table</h1>
+<p class="sub">
+  Every topic on session <span class="mono">{{ session_id }}</span>: who publishes it,
+  and which agents on which teams are woken by it.
+</p>
+
+<div class="card">
+{% if rows %}
+  <ul class="rows">
+  {% for row in rows %}
+    <li>
+      <span class="grow">
+        <span class="mono name">{{ row.topic }}</span>
+        {% if row.cross_team %}
+          <span class="pill s-running">cross-team</span>
+        {% elif not row.subscribers %}
+          <span class="pill s-pending">no subscribers</span>
+        {% endif %}
+        <span class="tags" style="margin-top:6px">
+        {% for team_id in row.publishers %}
+          <span class="tag">published by {{ team_id }}</span>
+        {% else %}
+          <span class="tag">no declared publisher</span>
+        {% endfor %}
+        </span>
+      </span>
+      <span class="wire mono">
+      {% for address in row.subscribers %}
+        <span class="to">{{ address }}</span>
+      {% else %}
+        <span class="count">—</span>
+      {% endfor %}
+      </span>
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">No topics wired up yet. Teams declare them when they register.</p>
+{% endif %}
+</div>
+{% endblock %}

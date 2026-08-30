@@ -43,6 +43,10 @@ class Task(BaseModel):
     parent_task_id: str | None = None
     # Artifact references only — never inlined artifact bodies.
     input_refs: dict[str, str] = Field(default_factory=dict)
+    #: Bus provenance. None for a team-local task; ``team://team/agent`` for one
+    #: delegated from another team (V2: propagate correlation through Tasks).
+    source: str | None = None
+    correlation_id: str | None = None
 
 
 class Event(BaseModel):

@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,14 @@ durable = [
     "pydantic-ai>=0.0.1",
 ]
 postgres = ["psycopg[binary]>=3.2"]
+# Tracing degrades to an in-memory recorder without these, so the unit suite
+# never needs them. Console/file export needs no backend; the OTLP exporter is
+# only useful once someone runs Jaeger/Tempo/Grafana.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp>=1.27",
+]
 
 [dependency-groups]
 dev = [

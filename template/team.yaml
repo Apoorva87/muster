@@ -1,0 +1,28 @@
+# Your team's public contract. This file is most of what makes a new team.
+#
+# Rename `mytreamid`, describe what the team is for, then declare your agents.
+# Everything else — durability, retries, timers, routing, artifacts, human
+# resume, tracing — comes from the runtime and needs no edits.
+team:
+  id: myteam
+  version: 1
+  description: One line on what this team is for
+
+agents:
+  director:
+    entrypoint: myteam.agents.director
+    capabilities: [coordinate]
+  specialist:
+    entrypoint: myteam.agents.specialist
+    capabilities: [do_the_thing]
+
+# topic -> agent. Every agent named here must exist above, or startup fails.
+subscriptions:
+  - {topic: work.requested, agent: specialist}
+  - {topic: work.complete,  agent: director}
+
+# What other teams may call and listen for. Namespace public topics with your
+# team id so they stay meaningful outside this team.
+public:
+  commands: [do_the_thing]
+  topics: [myteam.work.complete]

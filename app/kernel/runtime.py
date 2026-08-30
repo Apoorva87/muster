@@ -22,7 +22,7 @@ journal names stable across a replay of the same code path.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, Iterable
 
 from pydantic import BaseModel
 
@@ -52,13 +52,23 @@ class Kernel:
 
     def __init__(self, *, ctx: KernelContext, repository: Repository,
                  subscriptions: SubscriptionRegistry, artifacts: ArtifactStore,
-                 project_id: str | None = None) -> None:
+                 project_id: str | None = None, bus: Any = None,
+                 team_id: str = "", session_id: str = "local",
+                 public_topics: Iterable[str] = ()) -> None:
         self._ctx = ctx
         self._repo = repository
         self._subs = subscriptions
         self._artifacts = artifacts
         self._project_id = project_id or ctx.key
         self._step = 0
+        # V2 only. A standalone team leaves these unset and never imports bus/.
+        self._bus = bus
+        self._team_id = team_id
+        self._session_id = session_id
+        # Only a topic the team declares public crosses the team boundary.
+        # That is what keeps team-local chatter local, and it is why a local
+        # subscriber is never also woken over the bus.
+        self._public_topics = frozenset(public_topics)
 
     @property
     def project_id(self) -> str:
@@ -80,7 +90,12 @@ class Kernel:
                    parent_task_id: str | None = None,
                    delay: timedelta | None = None,
                    event_type: str = "task.sent") -> Task:
-        """Durably wake ``agent`` with a bounded task. Does not block."""
+        """Durably wake ``agent`` with a bounded task. Does not block.
+
+        ``agent`` may be a bare name (team-local) or a ``team://team/agent``
+        address, which routes over the bus. Agent code is identical either way
+        — that is the point of the seam.
+        """
         record = Task(
             id=await self._mint("task", f"{agent}:{task}"),
             project_id=self._project_id,
@@ -92,21 +107,26 @@ class Kernel:
         )
         self._repo.save_task(record)
 
-        self._ctx.send(
-            agent=agent,
-            handler=AGENT_HANDLER,
-            key=self._project_id,
-            payload={
-                "task_id": record.id,
-                "type": record.type,
-                "objective": record.objective,
-                "input_refs": record.input_refs,
-                **(payload or {}),
-            },
-            delay=delay,
-            # Restate dedups on this, so a duplicate delivery is not duplicate work.
-            idempotency_key=record.id,
-        )
+        if self._is_cross_team(agent):
+            await self._send_over_bus(agent=agent, task=task, objective=objective,
+                                      payload=payload, input_refs=input_refs,
+                                      record=record)
+        else:
+            self._ctx.send(
+                agent=agent,
+                handler=AGENT_HANDLER,
+                key=self._project_id,
+                payload={
+                    "task_id": record.id,
+                    "type": record.type,
+                    "objective": record.objective,
+                    "input_refs": record.input_refs,
+                    **(payload or {}),
+                },
+                delay=delay,
+                # Restate dedups on this, so duplicate delivery is not duplicate work.
+                idempotency_key=record.id,
+            )
 
         self._repo.record_run(RunRecord(
             id=await self._mint("run", f"send:{agent}:{task}"),
@@ -115,6 +135,42 @@ class Kernel:
             input_refs=dict(record.input_refs),
         ))
         return record
+
+    def _is_cross_team(self, agent: str) -> bool:
+        return agent.startswith("team://") and not agent.startswith(
+            f"team://{self._team_id}/")
+
+    async def _send_over_bus(self, *, agent: str, task: Task,
+                             objective: str, payload: dict[str, Any] | None,
+                             input_refs: dict[str, str] | None,
+                             record: Task) -> None:
+        """Route a command to another team.
+
+        Imported lazily so a standalone V1 team never needs the bus package
+        installed (V3 PRD: a custom team must work with the runtime alone).
+        """
+        if self._bus is None:
+            raise RuntimeError(
+                f"{agent} is a cross-team address but no bus is configured; "
+                "set BUS_ADAPTER=restate_bus and pass bus= to the Kernel")
+
+        from bus.models.address import Address
+        from bus.models.message import Message, MessageKind
+
+        address = Address.parse(agent)
+        await self._bus.send(address, Message(
+            kind=MessageKind.COMMAND,
+            session_id=self._session_id,
+            source_team=self._team_id,
+            source_agent="kernel",
+            destination=str(address),
+            project_id=self._project_id,
+            task_id=record.id,
+            correlation_id=record.id,
+            payload={"task_id": record.id, "type": task, "objective": objective,
+                     **(payload or {})},
+            artifact_refs=dict(input_refs or {}),
+        ))
 
     # --------------------------------------------------------------- events
 
@@ -148,14 +204,44 @@ class Kernel:
                 event_type="event.delivered",
             )
 
+        crossed = await self._publish_over_bus(event, payload or {})
+
         self._repo.record_run(RunRecord(
             id=await self._mint("run", f"publish:{topic}"),
             project_id=self._project_id, task_id=task_id, agent="kernel",
             event_type="event.published", status="COMPLETE",
             output_refs={"topic": topic, "subscribers": subscribers,
-                         "event_id": event.id},
+                         "cross_team": crossed, "event_id": event.id},
         ))
         return event
+
+    async def _publish_over_bus(self, event: Event,
+                                payload: dict[str, Any]) -> list[str]:
+        """Fan a public topic out to other teams.
+
+        Team-local subscribers were already woken directly, so only topics the
+        team declares public reach the bus — no subscriber is woken twice.
+        Imported lazily so a standalone team never needs the bus package.
+        """
+        if self._bus is None or event.topic not in self._public_topics:
+            return []
+
+        from bus.models.message import Message, MessageKind
+
+        woken = await self._bus.publish(event.topic, Message(
+            kind=MessageKind.EVENT,
+            topic=event.topic,
+            session_id=self._session_id,
+            source_team=self._team_id,
+            source_agent="kernel",
+            project_id=self._project_id,
+            task_id=event.task_id,
+            correlation_id=event.id,
+            payload=dict(payload),
+            artifact_refs={k: v for k, v in payload.items()
+                           if isinstance(v, str) and v.startswith("art_")},
+        ))
+        return [str(a) for a in woken]
 
     async def _resolve(self, *, topic: str) -> list[str]:
         return self._subs.subscribers_for(topic)

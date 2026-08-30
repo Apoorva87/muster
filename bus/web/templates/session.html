@@ -1,0 +1,33 @@
+{% extends "shell.html" %}
+{% block title %}Bus session — Muster{% endblock %}
+{% block crumb %}bus session {{ session_id }}{% endblock %}
+
+{% block bus %}
+<h1>Bus Session</h1>
+<p class="sub">
+  <span class="mono">{{ session_id }}</span> —
+  {{ teams|length }} team{{ '' if teams|length == 1 else 's' }} on the muster roll.
+  Counts come from each team's V1 runs.
+</p>
+
+<div class="card">
+{% if teams %}
+  <ul class="rows">
+  {% for team in teams %}
+    <li>
+      <span class="dot h-{{ team.health }}" title="{{ team.health }}"></span>
+      <span class="name grow"><a href="/team/{{ team.team_id }}">{{ team.team_id }}</a></span>
+      <span class="pill h-{{ team.health }}">{{ team.health }}</span>
+      <span class="count">{{ team.agents }} agent{{ '' if team.agents == 1 else 's' }}</span>
+      <span class="count">{{ team.running }} running</span>
+      {% if team.waiting %}
+        <span class="pill s-waiting_for_human">{{ team.waiting }} waiting</span>
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="empty">No teams have registered with this session yet.</p>
+{% endif %}
+</div>
+{% endblock %}

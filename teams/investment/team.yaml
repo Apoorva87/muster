@@ -1,0 +1,38 @@
+# The V1 team, now declaring its contract instead of hard-coding it.
+team:
+  id: investment
+  version: 1
+  description: Investment research and adversarial analysis
+
+agents:
+  director:
+    entrypoint: app.agents.director
+    capabilities: [coordinate, synthesize, decide]
+  research:
+    entrypoint: app.agents.research
+    capabilities: [gather_facts]
+  finance:
+    entrypoint: app.agents.finance
+    capabilities: [valuation, financial_analysis]
+  critic:
+    entrypoint: app.agents.critic
+    capabilities: [challenge, adversarial_review]
+  monitor:
+    entrypoint: app.agents.monitor
+    capabilities: [watch]
+
+subscriptions:
+  # team-local
+  - {topic: proposal.ready,     agent: critic}
+  - {topic: proposal.ready,     agent: finance}
+  - {topic: research.complete,  agent: director}
+  - {topic: finance.complete,   agent: director}
+  - {topic: critique.complete,  agent: director}
+  - {topic: market.changed,     agent: finance}
+  - {topic: market.changed,     agent: director}
+  # cross-team: wakes this team when the research team finishes
+  - {topic: research.report.ready, agent: director}
+
+public:
+  commands: [evaluate_company]
+  topics: [investment.analysis.completed]

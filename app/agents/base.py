@@ -20,7 +20,10 @@ from app.kernel.runtime import ApprovalDecision, Kernel
 
 AgentHandler = Callable[["AgentContext", Task], Awaitable[Any]]
 
-_REGISTRY: dict[str, AgentHandler] = {}
+#: Keyed by ``(team, name)``. An unscoped agent registers under team ``""`` and
+#: is reachable from any team, which is what keeps V1 working unchanged. Two
+#: teams in one process can therefore both have a ``director`` without colliding.
+_REGISTRY: dict[tuple[str, str], AgentHandler] = {}
 
 
 @runtime_checkable
@@ -43,25 +46,38 @@ class StubLLMRunner:
         return f"[{agent or 'agent'}] {head[:200]}"
 
 
-def agent(name: str) -> Callable[[AgentHandler], AgentHandler]:
-    """Register a domain handler under a logical agent name."""
+def agent(name: str, *, team: str = "") -> Callable[[AgentHandler], AgentHandler]:
+    """Register a domain handler under a logical agent name.
+
+    ``team`` scopes the registration so two teams sharing a process can each
+    have their own ``director`` or ``critic``.
+    """
     def decorator(fn: AgentHandler) -> AgentHandler:
-        if name in _REGISTRY:
-            raise ValueError(f"agent already registered: {name}")
-        _REGISTRY[name] = fn
+        key = (team, name)
+        if key in _REGISTRY:
+            scope = f" in team {team!r}" if team else ""
+            raise ValueError(f"agent already registered: {name!r}{scope}")
+        _REGISTRY[key] = fn
         return fn
     return decorator
 
 
-def get_agent(name: str) -> AgentHandler:
-    try:
-        return _REGISTRY[name]
-    except KeyError:
-        raise KeyError(f"unknown agent: {name!r}; registered: {sorted(_REGISTRY)}") from None
+def get_agent(name: str, team: str = "") -> AgentHandler:
+    """Resolve an agent, preferring the team-scoped registration."""
+    for key in ((team, name), ("", name)):
+        if key in _REGISTRY:
+            return _REGISTRY[key]
+    known = sorted(f"{t}/{n}" if t else n for t, n in _REGISTRY)
+    raise KeyError(f"unknown agent: {name!r}"
+                   + (f" in team {team!r}" if team else "")
+                   + f"; registered: {known}")
 
 
-def registered_agents() -> list[str]:
-    return sorted(_REGISTRY)
+def registered_agents(team: str | None = None) -> list[str]:
+    """Agent names. ``team=None`` lists every registration."""
+    if team is None:
+        return sorted({n for _, n in _REGISTRY})
+    return sorted(n for t, n in _REGISTRY if t == team)
 
 
 def clear_registry() -> None:
@@ -138,11 +154,26 @@ class AgentContext:
     def project_artifacts(self):
         return self._kernel.repository.list_artifacts(self.project_id)
 
+    def record_external_artifact(self, *, task: Task, artifact_id: str,
+                                 type: str, source: str) -> Artifact:
+        """Register a reference to an artifact owned by another team.
+
+        Only the reference is recorded — the bytes stay with the team that
+        produced them. That is what keeps a bus message small and keeps each
+        team's artifact store its own. Fetching a foreign body would need an
+        explicit cross-team artifact read, which V2 does not yet provide.
+        """
+        return self._kernel.repository.save_artifact(Artifact(
+            id=artifact_id, project_id=self.project_id, task_id=task.id,
+            type=type, path="", created_by=source,
+            meta={"external": True, "source": source}))
+
     def prompt(self, name: str) -> str:
         path = self._prompts / f"{name}.md"
         return path.read_text(encoding="utf-8") if path.is_file() else f"You are the {name} agent."
 
 
-async def dispatch(name: str, ctx: AgentContext, task: Task) -> Any:
+async def dispatch(name: str, ctx: AgentContext, task: Task,
+                   team: str = "") -> Any:
     """Entry point the Restate handler calls."""
-    return await get_agent(name)(ctx, task)
+    return await get_agent(name, team)(ctx, task)
