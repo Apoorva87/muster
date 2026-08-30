@@ -98,6 +98,20 @@ different path aborts the invocation with a code-path mismatch.
   models this; sharing a journal lets a later invocation replay an earlier one's
   reads and silently freeze the world.
 
+## Memory rules (V4)
+
+- **Markdown is canonical.** Deleting the derived index must lose nothing.
+- **Retrieved explicitly, never injected.** An uninvited memory is a shared
+  transcript by another name. `ctx.recall()` returns references; the body comes
+  from an explicit `ctx.load_memory(ref)`, exactly as artifacts work.
+- **Provenance or it is a rumour.** Every note names the runs and artifacts it
+  came from.
+- **`MEMORY_BACKEND=none` is a supported mode**, not a stub. Memory must never
+  be load-bearing.
+- **Use `ctx.root_objective(task)`, never `task.objective`**, when you need what
+  work is *about*. A reaction task's objective is "React to <topic>"; querying
+  memory with that finds nothing and the team silently never learns.
+
 ## Testing
 
 - **Every externally exposed feature needs unit tests.** No exceptions.
