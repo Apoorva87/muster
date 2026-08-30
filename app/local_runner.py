@@ -50,8 +50,8 @@ class LocalRunner:
         self.bus = bus
         self.session_id = session_id
 
-    def kernel(self) -> Kernel:
-        return Kernel(ctx=self.ctx, repository=self.repo,
+    def kernel(self, ctx: FakeKernelContext | None = None) -> Kernel:
+        return Kernel(ctx=ctx or self.ctx, repository=self.repo,
                       subscriptions=SubscriptionRegistry(self.repo),
                       artifacts=self.store, bus=self.bus,
                       team_id=self.team_id, session_id=self.session_id,
@@ -65,7 +65,9 @@ class LocalRunner:
         return self.llm.for_agent(provider, model)
 
     def agent_context(self, agent: str = "") -> AgentContext:
-        return AgentContext(kernel=self.kernel(), llm=self.llm_for(agent),
+        """One invocation, one journal — the same scoping Restate applies."""
+        return AgentContext(kernel=self.kernel(self.ctx.invocation()),
+                            llm=self.llm_for(agent),
                             prompts_dir=self.directory / "prompts")
 
     def inbound_task(self, send) -> Task:

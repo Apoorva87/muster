@@ -16,7 +16,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-COMPOSE ?= docker compose
+COMPOSE ?= ./scripts/compose.sh
 UV ?= uv
 
 RESTATE_ADMIN_URL ?= http://localhost:9070
@@ -48,6 +48,7 @@ help:
 	@echo "Muster targets:"
 	@echo "  make deps              install the durable + postgres extras"
 	@echo "  make up                start Restate and Postgres, wait for healthy"
+	@echo "  make engine            which container engine will be used"
 	@echo "  make down              stop them (named volumes kept)"
 	@echo "  make dev               up + migrate + run the service + register it"
 	@echo "  make serve             run the Muster service in the foreground"
@@ -72,10 +73,15 @@ deps:
 
 # ------------------------------------------------------------- infrastructure
 
-# --wait blocks on the compose healthchecks and exits non-zero if either
-# container never becomes healthy, so a broken stack fails here, not later.
+# Docker on a server (Coolify), Apple Container on a macOS laptop — same file.
+engine:
+	@$(COMPOSE) engine
+
+# The wrapper polls Restate's /health and pg_isready and exits non-zero if
+# either never comes up, so a broken stack fails here rather than later.
+# (container-compose has no `--wait`, which is why this is not compose's job.)
 up:
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up
 
 down:
 	$(COMPOSE) down
@@ -84,7 +90,7 @@ clean:
 	$(COMPOSE) down --volumes
 
 logs:
-	$(COMPOSE) logs -f
+	$(COMPOSE) logs
 
 ps:
 	$(COMPOSE) ps

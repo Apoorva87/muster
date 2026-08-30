@@ -80,6 +80,24 @@ Recorded in `docs/superpowers/specs/v1-runtime-decisions.md`. Do not relitigate 
 - Cross-team artifacts cross **by reference**: the receiving team registers the ID
   with `path=""` and `meta.external=True`; the bytes stay with the producing team.
 
+## Durable-execution rules (learned the hard way, against a live server)
+
+Restate replays a handler after a retry. Anything that makes the replay take a
+different path aborts the invocation with a code-path mismatch.
+
+- **Every id that travels in a send must be minted via `Kernel.mint()`** — task,
+  event, run *and artifact*. Artifact ids were missed and only live Restate
+  caught it.
+- **Every read of external mutable state that steers control flow must go
+  through `Kernel.step()`.** The director querying the artifact table to decide
+  whether both specialists had finished was exactly this bug: the first attempt
+  returned early, the world changed, the retry took a different branch.
+- **A journalled step's return value must be JSON-serializable.** Return
+  `model_dump(mode="json")` rows and rebuild models outside the step.
+- **One journal per invocation, not per process.** `FakeKernelContext.invocation()`
+  models this; sharing a journal lets a later invocation replay an earlier one's
+  reads and silently freeze the world.
+
 ## Testing
 
 - **Every externally exposed feature needs unit tests.** No exceptions.

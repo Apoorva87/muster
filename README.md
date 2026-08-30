@@ -92,6 +92,27 @@ make dev                      # run the Muster service and register it
 uv run python -m app.main web # timeline + approvals at http://localhost:8000
 ```
 
+### Container engine
+
+One `docker-compose.yml`, two engines. `make engine` reports which is in use.
+
+| Where | Engine | Notes |
+|---|---|---|
+| macOS laptop | **Apple Container** | native Linux containers, no Docker Desktop |
+| Server (Coolify) | **Docker** | `docker compose`, same file |
+
+```bash
+brew install container container-compose
+container system start
+container system kernel set --recommended
+make up
+```
+
+`scripts/compose.sh` auto-detects; force one with `MUSTER_ENGINE=docker|apple`.
+Ports are parameterised, so a machine already running Postgres just needs
+`POSTGRES_PORT=5433 make up` — the script checks the port first and says so
+rather than letting the container fail with a bare "address already in use".
+
 Not using uv? `requirements.txt` (runtime) and `requirements-dev.txt` (with test
 tooling) are generated from `uv.lock` and work with plain `pip install -r`.
 Regenerate them with `./setup.sh --lock`.

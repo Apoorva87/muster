@@ -131,9 +131,13 @@ class AgentContext:
         an artifact that exists only on disk cannot be passed as an input ref.
         """
         author = created_by or task.assigned_agent
+        # Minted through the journal: this id travels in the published event's
+        # payload, so a replay that invented a new one would diverge from the
+        # journalled send and Restate would fail the invocation.
+        artifact_id = await self._kernel.mint("art", f"artifact:{task.id}:{type}")
         ref = await self.artifacts.put(
-            project_id=self.project_id, task_id=task.id,
-            created_by=author, content=content, type=type)
+            project_id=self.project_id, task_id=task.id, created_by=author,
+            content=content, type=type, artifact_id=artifact_id)
 
         path_for = getattr(self.artifacts, "path_for", None)
         path = path_for(ref.id) if path_for else None
@@ -147,12 +151,27 @@ class AgentContext:
         fn = self._probes.get(name)
         return await fn() if fn else {"changed": False}
 
-    def project_tasks(self) -> list[Task]:
-        """Selected small project state — not a transcript."""
-        return self._kernel.repository.list_tasks(self.project_id)
+    async def project_tasks(self) -> list[Task]:
+        """Selected small project state — not a transcript.
 
-    def project_artifacts(self):
-        return self._kernel.repository.list_artifacts(self.project_id)
+        Journalled: the result steers control flow, so a replay must see the
+        same answer even if the table has moved on. The journal is JSON, so the
+        step returns plain data and the models are rebuilt outside it.
+        """
+        async def _read() -> list[dict[str, Any]]:
+            return [t.model_dump(mode="json")
+                    for t in self._kernel.repository.list_tasks(self.project_id)]
+
+        return [Task(**row) for row in await self._kernel.step("read:tasks", _read)]
+
+    async def project_artifacts(self) -> list[Artifact]:
+        """Journalled for the same reason as :meth:`project_tasks`."""
+        async def _read() -> list[dict[str, Any]]:
+            return [a.model_dump(mode="json")
+                    for a in self._kernel.repository.list_artifacts(self.project_id)]
+
+        return [Artifact(**row)
+                for row in await self._kernel.step("read:artifacts", _read)]
 
     def record_external_artifact(self, *, task: Task, artifact_id: str,
                                  type: str, source: str) -> Artifact:

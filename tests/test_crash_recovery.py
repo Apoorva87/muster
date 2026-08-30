@@ -79,6 +79,56 @@ async def test_replayed_side_effect_executes_once(repo, store):
     assert len(calls) == 1
 
 
+async def test_artifact_ids_are_replay_safe(repo, store):
+    """Regression: found only by running against a live Restate server.
+
+    An artifact id travels inside the published event's payload. Minting it
+    outside the journal meant a replay produced a different id, the resulting
+    send no longer matched the journalled one, and Restate aborted the
+    invocation with a code-path mismatch. Task, event and run ids were already
+    journalled; artifacts were missed because nothing replayed them for real.
+    """
+    import app.agents  # noqa: F401  registers the agents
+    from app.agents.base import AgentContext, StubLLMRunner, dispatch
+    from app.kernel.models import Task
+
+    ctx = FakeKernelContext(key="proj_1")
+
+    def agent_context():
+        return AgentContext(kernel=_kernel(ctx, repo, store), llm=StubLLMRunner())
+
+    task = Task(project_id="proj_1", type="analyze", objective="o",
+                assigned_agent="research")
+    repo.save_task(task)
+
+    first = await dispatch("research", agent_context(), task)
+    ctx.replay()
+    second = await dispatch("research", agent_context(), task)
+
+    assert first == second, "a replayed artifact must keep its journalled id"
+
+
+async def test_a_replayed_send_carries_identical_payload(repo, store):
+    """What Restate actually compares: the bytes of the one-way call."""
+    import app.agents  # noqa: F401
+    from app.agents.base import AgentContext, StubLLMRunner, dispatch
+    from app.kernel.models import Task
+
+    ctx = FakeKernelContext(key="proj_1")
+    task = Task(project_id="proj_1", type="analyze", objective="o",
+                assigned_agent="research")
+    repo.save_task(task)
+
+    def agent_context():
+        return AgentContext(kernel=_kernel(ctx, repo, store), llm=StubLLMRunner())
+
+    await dispatch("research", agent_context(), task)
+    before = [(s.agent, s.payload) for s in ctx.sends]
+    ctx.replay()
+    await dispatch("research", agent_context(), task)
+    assert [(s.agent, s.payload) for s in ctx.sends] == before
+
+
 async def test_artifacts_are_recoverable_after_index_loss(tmp_path):
     """The in-memory path index is a cache; the filesystem is the truth."""
     store = FilesystemArtifactStore(root=tmp_path)

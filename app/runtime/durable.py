@@ -40,6 +40,9 @@ annotations on the object handlers must stay real objects, not strings.
 
 import json
 from datetime import timedelta
+import os
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 try:  # pragma: no cover - exercised by whichever extra is installed
@@ -167,28 +170,131 @@ def build_agent_object(agent_name: str) -> Any:
 
     @obj.handler(name=HANDLER_NAME)
     async def handle(ctx: "restate.ObjectContext", payload: dict) -> dict:
-        # Imported lazily and per-invocation on purpose: the agent registry is a
-        # separate module, and this one must stay importable (for the protocol
-        # conformance tests) whether or not the registry exists yet.
-        try:
-            from app.agents.base import dispatch
-        except ImportError as exc:
-            raise RuntimeError(
-                "Cannot dispatch to agent "
-                f"{agent_name!r}: importing `dispatch` from app.agents.base "
-                f"failed ({exc}). app/runtime/durable.py only wires Restate to "
-                "the agent registry; the registry itself must expose "
-                "`async def dispatch(*, agent: str, ctx: KernelContext, "
-                "payload: dict) -> dict`."
-            ) from exc
+        # Imported lazily and per-invocation on purpose: this module must stay
+        # importable for the protocol conformance tests whether or not the
+        # agent registry has been loaded.
+        from app.agents.base import AgentContext, dispatch
+        from app.kernel.models import Task
+        from app.kernel.runtime import Kernel
 
-        return await dispatch(
-            agent=agent_name,
+        deps = team_deps()
+        project_id = ctx.key()
+
+        task = deps.task_from(payload, project_id=project_id, agent=agent_name)
+
+        kernel = Kernel(
             ctx=RestateKernelContext(ctx),
-            payload=payload,
+            repository=deps.repository,
+            subscriptions=deps.subscriptions,
+            artifacts=deps.artifacts,
+            project_id=project_id,
+            team_id=deps.team_id,
+            public_topics=deps.public_topics,
         )
+        agent_ctx = AgentContext(kernel=kernel, llm=deps.llm_for(agent_name),
+                                 prompts_dir=deps.prompts_dir)
+
+        result = await dispatch(agent_name, agent_ctx, task, team=deps.team_id)
+        return result if isinstance(result, dict) else {"result": result}
 
     return obj
+
+
+@dataclass
+class TeamDeps:
+    """Everything a handler needs, built once per process.
+
+    Restate invokes handlers concurrently, so this must be cheap to reuse and
+    must not hold per-invocation state — the ``KernelContext`` carries that.
+    """
+
+    team_id: str
+    repository: Any
+    subscriptions: Any
+    artifacts: Any
+    prompts_dir: Path
+    public_topics: tuple[str, ...]
+    spec: Any
+    _llm: Any
+
+    def llm_for(self, agent: str):
+        provider, model = self.spec.llm_for(agent)
+        return self._llm.for_agent(provider, model)
+
+    @staticmethod
+    def task_from(payload: dict, *, project_id: str, agent: str):
+        """Rebuild this team's own bounded task from the invocation payload.
+
+        A team never inherits a sender's task row. Handles both shapes: a
+        team-local send, and a bus envelope from another team.
+        """
+        from app.kernel.ids import new_id
+        from app.kernel.models import Task
+
+        if "kind" in payload:                      # a bus envelope
+            inner = payload.get("payload") or {}
+            topic = payload.get("topic")
+            return Task(
+                id=inner.get("task_id") or payload.get("task_id") or payload["id"],
+                project_id=project_id,
+                type=f"on:{topic}" if topic else inner.get("type", "handle"),
+                objective=inner.get("objective") or f"react to {topic}",
+                assigned_agent=agent,
+                input_refs=payload.get("artifact_refs") or {},
+                source=f"team://{payload.get('source_team')}/{payload.get('source_agent')}",
+                correlation_id=payload.get("correlation_id"))
+
+        return Task(
+            id=payload.get("task_id") or new_id("task"),
+            project_id=project_id,
+            type=payload.get("type", "handle"),
+            objective=payload.get("objective", ""),
+            assigned_agent=agent,
+            input_refs=payload.get("input_refs") or {})
+
+
+_DEPS: TeamDeps | None = None
+
+
+def team_deps(team_dir: str | None = None) -> TeamDeps:
+    """Build (once) the repository, subscriptions, artifact store and models."""
+    global _DEPS
+    if _DEPS is not None:
+        return _DEPS
+
+    from app.config import load_settings
+    from app.db.repository import Repository
+    from app.kernel.artifacts import FilesystemArtifactStore
+    from app.kernel.subscriptions import SubscriptionRegistry
+    from app.kernel.team_spec import load_team_spec
+    from app.runtime.llm import registry_from_settings
+
+    settings = load_settings()
+    directory = Path(team_dir or os.environ.get("MUSTER_TEAM_DIR", "teams/investment"))
+    spec = load_team_spec(directory)
+    spec.load_entrypoints()
+
+    repository = Repository.from_url(settings.database_url)
+    repository.init_schema()
+    spec.seed_into(repository)
+
+    _DEPS = TeamDeps(
+        team_id=spec.team_id,
+        repository=repository,
+        subscriptions=SubscriptionRegistry(repository),
+        artifacts=FilesystemArtifactStore(root=settings.artifact_root),
+        prompts_dir=directory / "prompts",
+        public_topics=tuple(spec.public.topics),
+        spec=spec,
+        _llm=registry_from_settings(settings),
+    )
+    return _DEPS
+
+
+def reset_deps() -> None:
+    """Test helper — drop the cached bundle."""
+    global _DEPS
+    _DEPS = None
 
 
 def agent_objects(names: tuple[str, ...] = AGENT_NAMES) -> list[Any]:

@@ -30,9 +30,11 @@ services:
     # restart instead of bootstrapping a fresh, empty node.
     command: ["--node-name=muster-restate-1"]
     ports:
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:9070:9070"
-      - "127.0.0.1:9071:9071"
+      # Parameterised so a host with something already on these ports (or a
+      # second stack) needs no file edit — set them in .env instead.
+      - "127.0.0.1:${RESTATE_INGRESS_PORT:-8080}:8080"
+      - "127.0.0.1:${RESTATE_ADMIN_PORT:-9070}:9070"
+      - "127.0.0.1:${RESTATE_STATUS_PORT:-9071}:9071"
     extra_hosts:
       # Lets Restate invoke the Muster service running on the host. Docker
       # Desktop resolves this name natively; `host-gateway` is what makes plain
@@ -57,6 +59,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       # Keeps index/collation behaviour identical across macOS and WSL2 hosts.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # initdb refuses a non-empty directory, and a volume mounted as its own
+      # filesystem carries a lost+found. Apple Container does exactly that, so
+      # put the cluster in a subdirectory. Harmless (and recommended) on Docker.
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:

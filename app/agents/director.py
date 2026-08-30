@@ -72,7 +72,7 @@ async def _maybe_propose(ctx: AgentContext, task: Task) -> dict:
                 task=task, artifact_id=artifact_id, type=kind,
                 source=task.source or task.assigned_agent)
 
-    artifacts = ctx.project_artifacts()
+    artifacts = await ctx.project_artifacts()
 
     # Idempotent at the semantic level: proposal.ready fans out to finance, so
     # without this guard a second finance.complete would re-propose endlessly.

@@ -103,6 +103,20 @@ class FakeKernelContext:
     async def sleep(self, delta: timedelta) -> None:
         return None
 
+    def invocation(self) -> "FakeKernelContext":
+        """A child context modelling one durable invocation.
+
+        Restate journals per *invocation*, not per process. Sharing one journal
+        across dispatches would let a second invocation replay the first one's
+        recorded reads — which silently freezes the world at whatever the first
+        one saw. Sends and awakeables stay shared because those are the relay
+        between invocations; only the journal is scoped.
+        """
+        child = FakeKernelContext(key=self.key)
+        child.sends = self.sends
+        child.awakeables = self.awakeables
+        return child
+
     def journal_names(self) -> list[str]:
         return [name for name, _ in self.journal]
 

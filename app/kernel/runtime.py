@@ -308,6 +308,28 @@ class Kernel:
         self._step += 1
         return self._step
 
+    async def step(self, name: str, fn, /, **kwargs) -> Any:
+        """Run a side effect or an external read exactly once per invocation.
+
+        Any read of mutable state outside this process — a database query, an
+        HTTP call — must go through here if its result influences control flow.
+        Restate replays a handler after a retry; if the world changed in
+        between, an unjournalled read returns a different answer, the handler
+        takes a different path, and the invocation dies with a code-path
+        mismatch. That is not hypothetical: the director deciding whether both
+        specialists had finished was exactly this bug.
+        """
+        return await self._ctx.run_typed(f"{name}:{self._next_step()}", fn, **kwargs)
+
+    async def mint(self, prefix: str, label: str) -> str:
+        """Public: mint a replay-safe ID for anything that crosses a send.
+
+        Anything whose value ends up in a durable invocation's payload must come
+        from here. An id minted outside the journal differs on replay, and
+        Restate rejects the divergence.
+        """
+        return await self._mint(prefix, label)
+
     async def _mint(self, prefix: str, label: str) -> str:
         """Mint an ID through the journal so a replay reuses it."""
         async def _generate() -> str:

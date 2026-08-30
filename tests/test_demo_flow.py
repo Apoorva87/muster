@@ -29,7 +29,8 @@ async def _drive(ctx, repo, store, *, decision="approve", rounds=40):
         for send in pending:
             seen.add(id(send))
             task = repo.get_task(send.payload["task_id"])
-            kernel = Kernel(ctx=ctx, repository=repo,
+            # One journal per invocation, exactly as Restate scopes it.
+            kernel = Kernel(ctx=ctx.invocation(), repository=repo,
                             subscriptions=SubscriptionRegistry(repo), artifacts=store)
             agent_ctx = AgentContext(kernel=kernel, llm=StubLLMRunner())
             inflight.append(asyncio.create_task(dispatch(send.agent, agent_ctx, task)))

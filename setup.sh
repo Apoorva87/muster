@@ -132,7 +132,10 @@ cat <<'NEXT'
   uv run pytest                      run the tests again
   make help                          see every target
 
-  Durable stack (needs Docker):
+  Durable stack (Apple Container on macOS, Docker on a server):
+    brew install container container-compose   # macOS, one time
+    container system start
+    container system kernel set --recommended
     ./setup.sh --durable             install the extras
     make up                          start Restate + Postgres
     make migrate                     create the schema, seed subscriptions

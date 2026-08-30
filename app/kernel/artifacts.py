@@ -39,7 +39,8 @@ class ArtifactRef(BaseModel):
 class ArtifactStore(Protocol):
     async def put(self, *, project_id: str, task_id: str, created_by: str,
                   content: Any, type: str = "markdown",
-                  meta: dict[str, Any] | None = None) -> ArtifactRef: ...
+                  meta: dict[str, Any] | None = None,
+                  artifact_id: str | None = None) -> ArtifactRef: ...
 
     async def get(self, artifact_id: str) -> str: ...
 
@@ -60,9 +61,17 @@ class FilesystemArtifactStore:
 
     async def put(self, *, project_id: str, task_id: str, created_by: str,
                   content: Any, type: str = "markdown",
-                  meta: dict[str, Any] | None = None) -> ArtifactRef:
+                  meta: dict[str, Any] | None = None,
+                  artifact_id: str | None = None) -> ArtifactRef:
+        """Write an artifact.
+
+        ``artifact_id`` must be supplied from inside a durable handler. Minting
+        one here would be non-deterministic: a replay would generate a fresh id,
+        the resulting send would differ from the journalled one, and Restate
+        would fail the invocation with a code-path mismatch.
+        """
         _safe_segment(project_id, "project_id")
-        artifact_id = new_id("art")
+        artifact_id = artifact_id or new_id("art")
         ext = _EXTENSIONS.get(type, "txt")
         directory = self._root / project_id
         directory.mkdir(parents=True, exist_ok=True)

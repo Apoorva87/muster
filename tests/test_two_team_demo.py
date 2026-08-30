@@ -51,15 +51,17 @@ class TeamHarness:
         self.ctx = FakeKernelContext(key=self.project_id)
         self.bus = bus
 
-    def kernel(self) -> Kernel:
-        return Kernel(ctx=self.ctx, repository=self.repo,
+    def kernel(self, ctx=None) -> Kernel:
+        return Kernel(ctx=ctx or self.ctx, repository=self.repo,
                       subscriptions=SubscriptionRegistry(self.repo),
                       artifacts=self.store, bus=self.bus,
                       team_id=self.team_id, session_id=SESSION,
                       public_topics=self.spec.public.topics)
 
     def agent_ctx(self) -> AgentContext:
-        return AgentContext(kernel=self.kernel(), llm=StubLLMRunner(),
+        # One journal per invocation, exactly as Restate scopes it.
+        return AgentContext(kernel=self.kernel(self.ctx.invocation()),
+                            llm=StubLLMRunner(),
                             prompts_dir=self.directory / "prompts")
 
     def local_task(self, send) -> Task:
