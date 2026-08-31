@@ -149,19 +149,25 @@ async def test_idempotency_key_travels_with_every_send(repo, store):
 
 # --------------------------------------------------------------- integration
 
-def _docker_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    return subprocess.run(["docker", "info"], capture_output=True,
-                          timeout=15).returncode == 0
+def _engine_available() -> bool:
+    """Docker on a server, Apple Container on a macOS laptop — either will do."""
+    if shutil.which("docker") and subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=15).returncode == 0:
+        return True
+    if shutil.which("container") and subprocess.run(
+            ["container", "system", "status"], capture_output=True,
+            timeout=15).returncode == 0:
+        return True
+    return False
 
 
-requires_docker = pytest.mark.skipif(
-    not _docker_available(), reason="needs a running Docker daemon")
+requires_containers = pytest.mark.skipif(
+    not _engine_available(),
+    reason="needs a container engine: `make up` (Docker or Apple Container)")
 
 
 @pytest.mark.integration
-@requires_docker
+@requires_containers
 async def test_kill_and_restart_the_agent_process():
     """Full release criterion — run with: uv run pytest -m integration
 

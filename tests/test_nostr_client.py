@@ -534,7 +534,12 @@ async def test_against_a_live_buzz_relay():
     """Requires a running Buzz relay; excluded from the default suite."""
     import os
 
-    url = os.environ.get("BUZZ_RELAY_URL", "ws://localhost:8080")
+    # No default: ws://localhost:8080 is Restate's ingress on a Muster machine,
+    # and pointing a Nostr client at it produces a confusing HTTP 400 rather
+    # than an honest skip.
+    url = os.environ.get("BUZZ_RELAY_URL", "")
+    if not url:
+        pytest.skip("set BUZZ_RELAY_URL to a real Buzz relay to run this")
     identity = Identity.derive("muster-integration")
     async with NostrClient(url, identity, relay_name=url) as client:
         assert await client.wait_authenticated(5.0)
