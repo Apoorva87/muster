@@ -14,8 +14,9 @@ build/
 .env
 .env.local
 
-# Runtime data
+# Runtime data — a real run writes notes into the team it ran as
 data/artifacts/
+teams/*/memory/
 logs/
 *.db
 *.sqlite3

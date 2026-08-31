@@ -42,7 +42,7 @@ SERVE_CMD = $(UV) run --extra durable uvicorn --factory app.runtime.durable:crea
 WAIT_FOR_SERVICE = for attempt in $$(seq 1 60); do if (exec 3<>/dev/tcp/127.0.0.1/$(MUSTER_SERVICE_PORT)) 2>/dev/null; then break; fi; if [ $$attempt -eq 60 ]; then echo "muster service never opened port $(MUSTER_SERVICE_PORT)" >&2; exit 1; fi; sleep 0.5; done
 REGISTER_DEPLOYMENT = curl -fsS -X POST $(RESTATE_ADMIN_URL)/deployments -H 'content-type: application/json' -d '{"uri": "$(MUSTER_SERVICE_URI)", "use_http_11": true, "force": true}'
 
-.PHONY: help deps up down clean logs ps dev serve register wait-service migrate test test-integration
+.PHONY: help deps up down clean logs ps dev serve register wait-service migrate test test-integration install-skills uninstall-skills
 
 help:
 	@echo "Muster targets:"
@@ -61,6 +61,8 @@ help:
 	@echo "  make test-integration  integration suite (needs 'make up' + 'make deps')"
 	@echo "  make logs / make ps    inspect the stack"
 	@echo "  make clean             down + delete the named volumes"
+	@echo "  make install-skills    make /muster-new and /muster-buzz work outside this repo"
+	@echo "  make uninstall-skills  remove those links"
 	@echo
 	@echo "  ingress   $(RESTATE_INGRESS_URL)"
 	@echo "  admin/UI  $(RESTATE_ADMIN_URL)"
@@ -160,3 +162,36 @@ test:
 
 test-integration:
 	$(UV) run pytest -m integration
+
+# ---------------------------------------------------------------------- skills
+
+# The skills already work inside this repo — Claude Code reads .claude/skills/
+# from the project it is started in. This target is only for using them from
+# *other* directories. Symlinks, not copies, so `git pull` updates the skills
+# and edits made while using them land back in the repo.
+SKILLS_SRC  := $(CURDIR)/.claude/skills
+SKILLS_DEST ?= $(HOME)/.claude/skills
+
+install-skills:
+	@mkdir -p $(SKILLS_DEST)
+	@for skill in $$(ls $(SKILLS_SRC)); do \
+	    dest="$(SKILLS_DEST)/$$skill"; \
+	    if [ -L "$$dest" ]; then \
+	        rm "$$dest"; \
+	    elif [ -e "$$dest" ]; then \
+	        echo "skipped $$skill: $$dest already exists and is not a symlink" >&2; \
+	        continue; \
+	    fi; \
+	    ln -s "$(SKILLS_SRC)/$$skill" "$$dest"; \
+	    echo "linked $$dest -> $(SKILLS_SRC)/$$skill"; \
+	done
+	@echo "Type /muster- in Claude Code to check; restart it if they do not appear."
+
+# Only removes links that point back into this checkout.
+uninstall-skills:
+	@for skill in $$(ls $(SKILLS_SRC)); do \
+	    dest="$(SKILLS_DEST)/$$skill"; \
+	    if [ -L "$$dest" ] && [ "$$(readlink "$$dest")" = "$(SKILLS_SRC)/$$skill" ]; then \
+	        rm "$$dest"; echo "removed $$dest"; \
+	    fi; \
+	done

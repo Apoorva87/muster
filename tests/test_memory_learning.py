@@ -139,6 +139,12 @@ async def test_a_forgotten_note_stays_forgotten(project, memory, tmp_path):
 
 async def test_memory_off_behaves_exactly_as_v3(tmp_path):
     """PRD acceptance: MEMORY_BACKEND=none runs identically to V3."""
+    # A real `make run` writes notes here, so assert on what *this* run added
+    # rather than on the directory being absent — otherwise a developer's own
+    # run makes the test fail for a reason that has nothing to do with it.
+    team_memory = Path("teams/investment/memory")
+    before = set(team_memory.glob("**/*.md"))
+
     runner = LocalRunner("teams/investment",
                          repository=Repository.from_url("sqlite://"),
                          artifact_root=tmp_path / "artifacts",
@@ -149,7 +155,7 @@ async def test_memory_off_behaves_exactly_as_v3(tmp_path):
 
     # Artifacts are markdown too, so look only where memory would land.
     assert not (tmp_path / "memory").exists(), "disabled memory must write nothing"
-    assert not list((Path("teams/investment") / "memory").glob("**/*.md"))
+    assert set(team_memory.glob("**/*.md")) == before, "disabled memory wrote a note"
     assert "What we learned before" not in await proposal_body(runner)
 
 

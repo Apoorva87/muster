@@ -306,6 +306,22 @@ Two skills, which chain:
 /muster-buzz     # puts that team in a chat room
 ```
 
+**Installing them.** Inside this repo there is nothing to install — Claude Code
+reads `.claude/skills/` from the project it was started in, so `/muster-new`
+works as soon as you `cd` here. To use them from any other directory:
+
+```bash
+make install-skills      # symlinks .claude/skills/* into ~/.claude/skills/
+```
+
+Symlinks, not copies, so `git pull` updates the skills and nothing drifts. The
+target refuses to overwrite a real directory of the same name, and
+`make uninstall-skills` removes only links pointing back into this checkout.
+Type `/muster-` to check they resolved; if they don't appear, restart Claude
+Code, since skills are scanned at startup. For a harness with no native skill loading
+(Codex, for instance), there is nothing to install either — point it at
+`.claude/skills/muster-new/SKILL.md` and tell it to follow the file.
+
 `muster-new` asks eleven questions in three batches — the shape of the work, how
 it runs (which model per agent, whether it should learn), and where the human
 sits — then **argues against your topology before writing anything**. It refuses
