@@ -46,17 +46,28 @@ them, never the source of truth.
   in-process and is invoked as a subprocess or over MCP, exactly as the
   `claude_code` and `codex` model providers are.
 
-### GBrain keeps one brain per user
-Verified by running it: GBrain stores its brain under `~/.gbrain`, and it is not
-scoped by working directory — a brain re-initialised in a fresh directory still
-answered with pages imported from a different corpus.
+### One brain, one source per team
+GBrain keeps a single brain per user under `~/.gbrain`. There is no per-team
+setup cost and none is wanted — a second brain per team would pay for the whole
+install again for no benefit.
 
-Team isolation is therefore enforced by **our adapter**, which resolves every
-result back to a file under that team's root and drops anything that does not
-exist there. That filter is load-bearing, not defensive decoration: without it a
-shared brain answers one team's recall with another team's pages. `--source <id>`
-is GBrain's own scoping mechanism and can be added through `query_args` if
-upstream scoping is also wanted.
+Teams are separated by GBrain's own **sources**, which are exactly the partition
+this needs:
+
+```bash
+gbrain sources add muster-<team> --path teams/<team>/memory --force
+GBRAIN_SOURCE=muster-<team> gbrain import teams/<team>/memory   # write
+gbrain query "<q>" --source-id muster-<team>                     # read
+```
+
+A source is created **non-federated** — "only searched when explicitly named" —
+so isolation is the default rather than something we impose afterwards, and
+GBrain applies the scope at SQL level on every retrieval leg. Verified: two
+teams holding notes with the same filename and matching the same term each
+recall only their own, which a path-based filter could not have guaranteed.
+
+The adapter still checks that a result resolves to a file under the team's root.
+That is defence in depth now, not the mechanism.
 
 ### The GBrain cost, stated plainly
 GBrain is a TypeScript/Bun program. A Python project reaches it across a

@@ -49,6 +49,7 @@ invented here. Anything beyond the two verified invocations is *configuration*
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import logging
 import shutil
@@ -93,7 +94,8 @@ CommandRunner = Callable[..., Awaitable[CommandResult]]
 
 
 async def run_subprocess(argv: Sequence[str], *, timeout: float,
-                         cwd: str | None = None) -> CommandResult:
+                         cwd: str | None = None,
+                         env: dict[str, str] | None = None) -> CommandResult:
     """Default runner: the same shape as ``CliAgentRunner`` drives its CLI.
 
     Kills the process on timeout and lets ``asyncio.TimeoutError`` escape —
@@ -102,7 +104,7 @@ async def run_subprocess(argv: Sequence[str], *, timeout: float,
     """
     process = await asyncio.create_subprocess_exec(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        cwd=cwd)
+        cwd=cwd, env={**os.environ, **(env or {})} if env else None)
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(),
                                                 timeout=timeout)
@@ -151,6 +153,7 @@ class GBrainMemoryStore:
                  require: bool = False, index_on_write: bool = True,
                  query_args: Iterable[str] = (),
                  import_args: Iterable[str] = (),
+                 source_id: str = "",
                  cwd: str | None = None,
                  runner: CommandRunner | None = None,
                  locate: Callable[[str], str | None] | None = None) -> None:
@@ -162,6 +165,12 @@ class GBrainMemoryStore:
         self._index_on_write = index_on_write
         self._query_args = list(query_args)
         self._import_args = list(import_args)
+        # One brain, one source per team — GBrain's own partitioning. Sources
+        # are created non-federated, so a source is invisible to any query that
+        # does not name it. That is the isolation V4 rule 4 asks for, enforced
+        # by the store rather than by us filtering afterwards.
+        self._source_id = source_id or f"muster-{team_id}"
+        self._source_ready = False
         self._cwd = cwd
         self._runner: CommandRunner = runner or run_subprocess
         if locate is not None:
@@ -197,34 +206,46 @@ class GBrainMemoryStore:
 
     # ------------------------------------------------------------- commands
 
-    #: How far to over-fetch before filtering to this team's files.
-    #:
-    #: ``~/.gbrain`` is shared across every team on the machine, so GBrain
-    #: applies ``--limit`` across ALL pages and we filter afterwards. Asking for
-    #: exactly ``limit`` therefore lets another team's pages crowd this team out
-    #: entirely — observed for real once a brain had a few corpora in it, which
-    #: is the normal condition rather than an edge case.
-    OVERFETCH = 8
-    OVERFETCH_MIN = 25
+    @property
+    def source_id(self) -> str:
+        """This team's partition inside the one shared brain."""
+        return self._source_id
 
-    def _fetch_size(self, limit: int) -> int:
-        return max(max(limit, 1) * self.OVERFETCH, self.OVERFETCH_MIN)
+    def sources_add_command(self) -> list[str]:
+        """Register this team's partition. Idempotent; ``--force`` because a
+        team's memory directory is not required to be its own git repo."""
+        # The NAME carries a unique constraint of its own, not just the id, so
+        # it is derived from the source id. Naming it after the team alone made
+        # a second partition for that team fail with a raw Postgres duplicate-key
+        # error — which only a real brain reveals.
+        return [self._binary, "sources", "add", self._source_id,
+                "--path", str(self._root),
+                "--name", f"Muster {self.team_id} ({self._source_id})",
+                "--force"]
 
     def query_command(self, query: str, limit: int) -> list[str]:
         """``gbrain query <question> --limit N --json`` plus configured extras."""
         return [self._binary, "query", query,
+                # Scope to this team's source. GBrain applies it at SQL level on
+                # every retrieval leg, so the limit is honest and no over-fetch
+                # is needed — and two teams whose notes share a filename can no
+                # longer be confused, which a path filter could not guarantee.
+                "--source-id", self._source_id,
                 "--limit", str(max(limit, 1)), "--json", *self._query_args]
 
-    #: GBrain keeps ONE brain per user under ``~/.gbrain``. It is NOT scoped by
-    #: working directory — verified by observation: a brain re-inited in a fresh
-    #: directory still answered with pages imported from another corpus.
+    #: GBrain keeps ONE brain per user under ``~/.gbrain`` — there is no
+    #: per-team setup cost, and none is wanted. Teams are separated by GBrain's
+    #: own **sources**: ``gbrain sources add <id> --path <corpus>`` registers a
+    #: partition, and a source is created *non-federated*, meaning it is only
+    #: searched when explicitly named. Writes carry ``GBRAIN_SOURCE``; reads
+    #: carry ``--source-id``, which GBrain applies at SQL level on every
+    #: retrieval leg.
     #:
-    #: So team isolation (V4 rule 4) is enforced HERE, not by GBrain: every
-    #: result is resolved back to a file under this team's root and dropped if
-    #: it does not exist. Removing that filter would let one team's recall
-    #: return another team's pages. ``--source <id>`` via ``query_args`` is the
-    #: upstream mechanism if you want GBrain to scope as well.
-    SHARED_BRAIN_NOTE = "~/.gbrain is global; isolation is enforced by this adapter"
+    #: That is real isolation rather than filtering afterwards, and it is what
+    #: lets two teams hold notes with the same filename without ambiguity — a
+    #: path-based filter could not tell them apart. The file check below stays
+    #: as defence in depth, not as the mechanism.
+    SHARED_BRAIN_NOTE = "one brain, one source per team; sources are non-federated"
 
     #: What a deferred-embedding brain says when asked to import. `gbrain init`
     #: produces exactly such a brain, so this is the DEFAULT path a user walks,
@@ -287,7 +308,8 @@ class GBrainMemoryStore:
         or fails, unless ``require=True``. Explicit, bounded, references only:
         the same contract as every other backend.
         """
-        rows = await self._try(self.query_command(query, self._fetch_size(limit)))
+        await self._ensure_source()
+        rows = await self._try(self.query_command(query, limit))
         if rows is None:
             self._check(rows)
             return await self._files.recall(query, limit=limit, kinds=kinds)
@@ -346,6 +368,35 @@ class GBrainMemoryStore:
 
     # ------------------------------------------------------------ internals
 
+    #: GBrain refuses to re-point a source at a different directory, because
+    #: replacing one means deleting its pages.
+    SOURCE_PATH_CONFLICT = "is already registered with local_path"
+
+    async def _ensure_source(self) -> None:
+        """Register this team's partition once per process. Idempotent.
+
+        A source id is permanently bound to a path. If one is already bound to a
+        *different* directory, recall silently returns nothing — GBrain answers
+        from the old corpus and the file check drops every row. Silent-empty is
+        the worst failure a memory can have, so say so loudly.
+        """
+        if self._source_ready:
+            return
+        self._source_ready = True
+
+        if await self._try(self.sources_add_command(),
+                           expect_json=False) is not None:
+            return
+        if self.SOURCE_PATH_CONFLICT in (self._reason or ""):
+            logger.warning(
+                "gbrain source %r is registered against a different directory, "
+                "not %s. Recall will find nothing until they agree. Either point "
+                "this team at the registered path, pass source_id=... for a new "
+                "partition, or `gbrain sources remove %s --confirm-destructive` "
+                "and let it re-register (that deletes its indexed pages). "
+                "Detail: %s",
+                self._source_id, self._root, self._source_id, self._reason)
+
     async def _index(self) -> dict[str, Any] | None:
         """Import the corpus, retrying once without embeddings if needed.
 
@@ -354,7 +405,11 @@ class GBrainMemoryStore:
         the default install path work; a brain that *does* have embeddings still
         gets them, because the retry only happens on that specific message.
         """
-        payload = await self._try(self.import_command())
+        await self._ensure_source()
+        # GBRAIN_SOURCE is how an import chooses its partition; `gbrain import`
+        # has no --source flag of its own.
+        env = {"GBRAIN_SOURCE": self._source_id}
+        payload = await self._try(self.import_command(), env)
         if payload is not None:
             return payload
 
@@ -363,10 +418,12 @@ class GBrainMemoryStore:
                 "gbrain brain has no embedding provider; importing keyword-only. "
                 "Configure one with `gbrain config set embedding_model "
                 "<provider>:<model>` for semantic recall.")
-            return await self._try(self.import_command(no_embed=True))
+            return await self._try(self.import_command(no_embed=True), env)
         return None
 
-    async def _try(self, argv: list[str]) -> dict[str, Any] | None:
+    async def _try(self, argv: list[str],
+                   env: dict[str, str] | None = None, *,
+                   expect_json: bool = True) -> dict[str, Any] | None:
         """Run one GBrain command. ``None`` means "it did not work".
 
         Every way GBrain can fail — not installed, not executable, timed out,
@@ -380,7 +437,8 @@ class GBrainMemoryStore:
             return None
 
         try:
-            result = await self._runner(argv, timeout=self._timeout, cwd=self._cwd)
+            result = await self._runner(argv, timeout=self._timeout,
+                                        cwd=self._cwd, env=env)
         except asyncio.TimeoutError:
             self._reason = (f"{self._binary} {argv[1]} timed out after "
                             f"{self._timeout}s")
@@ -394,6 +452,12 @@ class GBrainMemoryStore:
             self._reason = (f"{self._binary} {argv[1]} exited "
                             f"{result.returncode}: {detail}")
             return None
+
+        if not expect_json:
+            # `gbrain sources add` prints prose and exits 0. Reading that as a
+            # failure made a successful registration look broken and put a
+            # misleading reason in every later diagnostic.
+            return {"status": "success", "stdout": result.stdout.strip()}
 
         payload, error = _decode(result.stdout)
         if error is not None:

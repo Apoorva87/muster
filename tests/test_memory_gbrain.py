@@ -21,6 +21,8 @@ import json
 import logging
 import shutil
 
+import uuid
+
 import pytest
 
 from app.kernel.memory import Confidence, MemoryKind, MemoryStore
@@ -44,7 +46,7 @@ class FakeGBrain:
         self.timeouts: list[float] = []
         self.cwds: list[str | None] = []
 
-    async def __call__(self, argv, *, timeout, cwd=None) -> CommandResult:
+    async def __call__(self, argv, *, timeout, cwd=None, env=None) -> CommandResult:
         self.calls.append(list(argv))
         self.timeouts.append(timeout)
         self.cwds.append(cwd)
@@ -141,8 +143,11 @@ async def test_markdown_is_written_before_gbrain_is_asked_to_index(tmp_path):
     """Ordering, not just outcome: the file exists by the time import runs."""
     seen: list[int] = []
 
-    async def runner(argv, *, timeout, cwd=None):
-        seen.append(len(list((tmp_path / "memory").rglob("*.md"))))
+    async def runner(argv, *, timeout, cwd=None, env=None):
+        # `sources add` registers the team's partition; only the import tells us
+        # anything about ordering.
+        if argv[1] != "sources":
+            seen.append(len(list((tmp_path / "memory").rglob("*.md"))))
         return ok({"status": "success", "imported": 1})
 
     store = make_store(tmp_path, runner=runner)
@@ -180,11 +185,10 @@ async def test_query_command_carries_the_query_the_limit_and_json(tmp_path):
     await store.recall("valuation multiples", limit=3)
 
     assert fake.commands("query") == [
-        # Over-fetched: ~/.gbrain is shared across teams, so we ask for more
-        # than we need and filter to this team's files afterwards. Asking for
-        # exactly `limit` lets another team's pages crowd this team out.
+        # Scoped to this team's source: GBrain filters at SQL level, so the
+        # limit is honest and no over-fetch is needed.
         ["gbrain", "query", "valuation multiples",
-         "--limit", str(GBrainMemoryStore.OVERFETCH_MIN), "--json"]]
+         "--source-id", "muster-investment", "--limit", "3", "--json"]]
 
 
 async def test_import_command_carries_the_corpus_path(tmp_path):
@@ -209,12 +213,15 @@ async def test_binary_extra_args_timeout_and_cwd_are_configurable(tmp_path):
 
     assert fake.commands("query")[0] == [
         "/opt/brains/gbrain", "query", "q",
-        "--limit", str(GBrainMemoryStore.OVERFETCH_MIN), "--json",
+        "--source-id", "muster-investment", "--limit", "2", "--json",
         "--source", "team-investment"]
     assert fake.commands("import")[0] == [
         "/opt/brains/gbrain", "import", str(store.root), "--json", "--no-embed"]
-    assert fake.timeouts == [12.5, 12.5]
-    assert fake.cwds == [str(tmp_path), str(tmp_path)]
+    # One extra call: the one-time `sources add` that registers the partition.
+    assert fake.timeouts == [12.5, 12.5, 12.5]
+    # Three calls now: `sources add`, then import, then query — all in the
+    # configured cwd, which is what selects the brain.
+    assert fake.cwds == [str(tmp_path)] * 3
 
 
 async def test_index_on_write_can_be_turned_off(tmp_path):
@@ -457,7 +464,8 @@ async def test_the_default_runner_actually_spawns_a_process():
 async def test_real_gbrain_indexes_the_corpus(tmp_path):
     if shutil.which("gbrain") is None:
         pytest.skip("gbrain is not installed (bun install -g github:garrytan/gbrain)")
-    store = GBrainMemoryStore(tmp_path / "memory", TEAM, require=True)
+    store = GBrainMemoryStore(tmp_path / "memory", TEAM, require=True,
+                              source_id=f"test-{uuid.uuid4().hex[:8]}")
     await store.remember(kind=MemoryKind.LESSON, subject="valuation-multiples",
                          summary="Cite a peer group with any P/E.",
                          sources=["run_c3d4"], confidence=Confidence.HIGH)
@@ -468,7 +476,8 @@ async def test_real_gbrain_indexes_the_corpus(tmp_path):
 async def test_real_gbrain_recalls_what_it_indexed(tmp_path):
     if shutil.which("gbrain") is None:
         pytest.skip("gbrain is not installed (bun install -g github:garrytan/gbrain)")
-    store = GBrainMemoryStore(tmp_path / "memory", TEAM, require=True)
+    store = GBrainMemoryStore(tmp_path / "memory", TEAM, require=True,
+                              source_id=f"test-{uuid.uuid4().hex[:8]}")
     ref = await store.remember(kind=MemoryKind.LESSON, subject="valuation-multiples",
                                summary="Cite a peer group with any P/E.",
                                sources=["run_c3d4"])
@@ -495,8 +504,14 @@ async def test_a_shared_brain_never_leaks_another_teams_pages(tmp_path):
     from app.kernel.memory import MemoryKind
     from app.memory.gbrain import GBrainMemoryStore
 
-    ours = GBrainMemoryStore(root=tmp_path / "ours", team_id="investment")
-    theirs = GBrainMemoryStore(root=tmp_path / "theirs", team_id="research")
+    # A source id is bound to a path for good, and tmp_path moves every run —
+    # so these get their own partitions rather than colliding with a previous
+    # run's registration.
+    stamp = uuid.uuid4().hex[:8]
+    ours = GBrainMemoryStore(root=tmp_path / "ours", team_id="investment",
+                             source_id=f"test-inv-{stamp}")
+    theirs = GBrainMemoryStore(root=tmp_path / "theirs", team_id="research",
+                               source_id=f"test-res-{stamp}")
 
     await theirs.remember(kind=MemoryKind.LESSON, subject="quantum widgets",
                           summary="Quantum widgets are the research team's topic.",

@@ -212,9 +212,10 @@ exists to prevent.
 
 GBrain install (verified): `bun install -g github:garrytan/gbrain` then
 `gbrain init --pglite`. It is **not** on npm — `npm install -g gbrain` fetches
-an unrelated package. GBrain keeps one brain per user under `~/.gbrain`, shared
-across teams, so per-team isolation is enforced by Muster's adapter: every
-result is resolved back to a file under that team's root and dropped otherwise.
+an unrelated package. GBrain keeps one brain per user under `~/.gbrain` — there is no per-team setup
+cost. Teams are separated by GBrain's own **sources** (`muster-<team>`), created
+non-federated so a partition is only searched when explicitly named, and applied
+at SQL level on both read and write.
 | `none` | nothing. The team behaves exactly as it did in V3 |
 
 Per-agent permissions in `team.yaml` — a critic that remembers past objections
