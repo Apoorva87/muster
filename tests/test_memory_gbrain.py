@@ -180,7 +180,11 @@ async def test_query_command_carries_the_query_the_limit_and_json(tmp_path):
     await store.recall("valuation multiples", limit=3)
 
     assert fake.commands("query") == [
-        ["gbrain", "query", "valuation multiples", "--limit", "3", "--json"]]
+        # Over-fetched: ~/.gbrain is shared across teams, so we ask for more
+        # than we need and filter to this team's files afterwards. Asking for
+        # exactly `limit` lets another team's pages crowd this team out.
+        ["gbrain", "query", "valuation multiples",
+         "--limit", str(GBrainMemoryStore.OVERFETCH_MIN), "--json"]]
 
 
 async def test_import_command_carries_the_corpus_path(tmp_path):
@@ -204,7 +208,8 @@ async def test_binary_extra_args_timeout_and_cwd_are_configurable(tmp_path):
     await store.rebuild_index()
 
     assert fake.commands("query")[0] == [
-        "/opt/brains/gbrain", "query", "q", "--limit", "2", "--json",
+        "/opt/brains/gbrain", "query", "q",
+        "--limit", str(GBrainMemoryStore.OVERFETCH_MIN), "--json",
         "--source", "team-investment"]
     assert fake.commands("import")[0] == [
         "/opt/brains/gbrain", "import", str(store.root), "--json", "--no-embed"]
@@ -470,3 +475,34 @@ async def test_real_gbrain_recalls_what_it_indexed(tmp_path):
     refs = await store.recall("peer group comparison for a P/E multiple", limit=3)
     assert ref.id in {r.id for r in refs}
 
+
+
+@pytest.mark.integration
+async def test_a_shared_brain_never_leaks_another_teams_pages(tmp_path):
+    """GBrain keeps ONE brain per user under ~/.gbrain, not one per directory.
+
+    Verified by observation: a brain re-inited in a fresh directory still
+    answered with pages from a previously imported corpus. So V4's rule that a
+    team's memory is its own is enforced *here* — every result is resolved back
+    to a file under this team's root — and this test is what keeps that filter
+    from being deleted as redundant.
+    """
+    import shutil
+
+    if shutil.which("gbrain") is None:
+        pytest.skip("gbrain is not installed (bun install -g github:garrytan/gbrain)")
+
+    from app.kernel.memory import MemoryKind
+    from app.memory.gbrain import GBrainMemoryStore
+
+    ours = GBrainMemoryStore(root=tmp_path / "ours", team_id="investment")
+    theirs = GBrainMemoryStore(root=tmp_path / "theirs", team_id="research")
+
+    await theirs.remember(kind=MemoryKind.LESSON, subject="quantum widgets",
+                          summary="Quantum widgets are the research team's topic.",
+                          sources=["run_theirs"])
+    await theirs.rebuild_index()
+
+    # The shared brain now knows about "quantum widgets". Our team must not.
+    assert await ours.recall("quantum widgets") == [], \
+        "a shared brain leaked another team's pages into this team's recall"

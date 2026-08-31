@@ -209,6 +209,12 @@ exists to prevent.
 |---|---|
 | `filesystem` | nothing. Markdown + lexical search. The default |
 | `gbrain` | the `gbrain` CLI ([GBrain](https://github.com/garrytan/gbrain), TypeScript/Bun); degrades to lexical search if absent |
+
+GBrain install (verified): `bun install -g github:garrytan/gbrain` then
+`gbrain init --pglite`. It is **not** on npm — `npm install -g gbrain` fetches
+an unrelated package. GBrain keeps one brain per user under `~/.gbrain`, shared
+across teams, so per-team isolation is enforced by Muster's adapter: every
+result is resolved back to a file under that team's root and dropped otherwise.
 | `none` | nothing. The team behaves exactly as it did in V3 |
 
 Per-agent permissions in `team.yaml` — a critic that remembers past objections

@@ -197,20 +197,53 @@ class GBrainMemoryStore:
 
     # ------------------------------------------------------------- commands
 
+    #: How far to over-fetch before filtering to this team's files.
+    #:
+    #: ``~/.gbrain`` is shared across every team on the machine, so GBrain
+    #: applies ``--limit`` across ALL pages and we filter afterwards. Asking for
+    #: exactly ``limit`` therefore lets another team's pages crowd this team out
+    #: entirely — observed for real once a brain had a few corpora in it, which
+    #: is the normal condition rather than an edge case.
+    OVERFETCH = 8
+    OVERFETCH_MIN = 25
+
+    def _fetch_size(self, limit: int) -> int:
+        return max(max(limit, 1) * self.OVERFETCH, self.OVERFETCH_MIN)
+
     def query_command(self, query: str, limit: int) -> list[str]:
         """``gbrain query <question> --limit N --json`` plus configured extras."""
         return [self._binary, "query", query,
                 "--limit", str(max(limit, 1)), "--json", *self._query_args]
 
-    def import_command(self) -> list[str]:
+    #: GBrain keeps ONE brain per user under ``~/.gbrain``. It is NOT scoped by
+    #: working directory — verified by observation: a brain re-inited in a fresh
+    #: directory still answered with pages imported from another corpus.
+    #:
+    #: So team isolation (V4 rule 4) is enforced HERE, not by GBrain: every
+    #: result is resolved back to a file under this team's root and dropped if
+    #: it does not exist. Removing that filter would let one team's recall
+    #: return another team's pages. ``--source <id>`` via ``query_args`` is the
+    #: upstream mechanism if you want GBrain to scope as well.
+    SHARED_BRAIN_NOTE = "~/.gbrain is global; isolation is enforced by this adapter"
+
+    #: What a deferred-embedding brain says when asked to import. `gbrain init`
+    #: produces exactly such a brain, so this is the DEFAULT path a user walks,
+    #: not an edge case.
+    DEFERRED_EMBEDDING = "initialized with `--no-embedding`"
+
+    def import_command(self, *, no_embed: bool = False) -> list[str]:
         """``gbrain import <corpus> --json`` plus configured extras.
 
         The corpus path travels here. ``gbrain query`` takes no corpus
         argument — scoping a shared brain is ``--source <id>``, an id and not a
         path — so that is left to ``query_args`` rather than guessed at.
+
+        ``no_embed`` is the retry form for a brain with no embedding provider.
         """
-        return [self._binary, "import", str(self._root), "--json",
-                *self._import_args]
+        extra = list(self._import_args)
+        if no_embed and "--no-embed" not in extra:
+            extra.append("--no-embed")
+        return [self._binary, "import", str(self._root), "--json", *extra]
 
     # -------------------------------------------------------------- writing
 
@@ -235,7 +268,7 @@ class GBrainMemoryStore:
         if self._index_on_write:
             # Failure here has already been survived: it degrades or, under
             # `require`, raises with the note safely written.
-            self._check(await self._try(self.import_command()))
+            self._check(await self._index())
         return ref
 
     # -------------------------------------------------------------- reading
@@ -254,7 +287,7 @@ class GBrainMemoryStore:
         or fails, unless ``require=True``. Explicit, bounded, references only:
         the same contract as every other backend.
         """
-        rows = await self._try(self.query_command(query, limit))
+        rows = await self._try(self.query_command(query, self._fetch_size(limit)))
         if rows is None:
             self._check(rows)
             return await self._files.recall(query, limit=limit, kinds=kinds)
@@ -288,7 +321,7 @@ class GBrainMemoryStore:
         """
         removed = await self._files.forget(note_id)
         if removed and self._index_on_write:
-            self._check(await self._try(self.import_command()))
+            self._check(await self._index())
         return removed
 
     # ---------------------------------------------------------------- index
@@ -301,7 +334,7 @@ class GBrainMemoryStore:
         because the corpus is what is true.
         """
         count = await self._files.rebuild_index()
-        payload = await self._try(self.import_command())
+        payload = await self._index()
         self._check(payload)
         if payload is not None:
             body = payload.get("payload")
@@ -312,6 +345,26 @@ class GBrainMemoryStore:
         return count
 
     # ------------------------------------------------------------ internals
+
+    async def _index(self) -> dict[str, Any] | None:
+        """Import the corpus, retrying once without embeddings if needed.
+
+        `gbrain init` produces a brain with embedding deferred, and such a
+        brain refuses a plain import. Retrying with ``--no-embed`` is what makes
+        the default install path work; a brain that *does* have embeddings still
+        gets them, because the retry only happens on that specific message.
+        """
+        payload = await self._try(self.import_command())
+        if payload is not None:
+            return payload
+
+        if self.DEFERRED_EMBEDDING in (self._reason or ""):
+            logger.info(
+                "gbrain brain has no embedding provider; importing keyword-only. "
+                "Configure one with `gbrain config set embedding_model "
+                "<provider>:<model>` for semantic recall.")
+            return await self._try(self.import_command(no_embed=True))
+        return None
 
     async def _try(self, argv: list[str]) -> dict[str, Any] | None:
         """Run one GBrain command. ``None`` means "it did not work".

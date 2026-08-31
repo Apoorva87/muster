@@ -46,6 +46,18 @@ them, never the source of truth.
   in-process and is invoked as a subprocess or over MCP, exactly as the
   `claude_code` and `codex` model providers are.
 
+### GBrain keeps one brain per user
+Verified by running it: GBrain stores its brain under `~/.gbrain`, and it is not
+scoped by working directory — a brain re-initialised in a fresh directory still
+answered with pages imported from a different corpus.
+
+Team isolation is therefore enforced by **our adapter**, which resolves every
+result back to a file under that team's root and drops anything that does not
+exist there. That filter is load-bearing, not defensive decoration: without it a
+shared brain answers one team's recall with another team's pages. `--source <id>`
+is GBrain's own scoping mechanism and can be added through `query_args` if
+upstream scoping is also wanted.
+
 ### The GBrain cost, stated plainly
 GBrain is a TypeScript/Bun program. A Python project reaches it across a
 process boundary, which means: another runtime to install, a CLI contract that
