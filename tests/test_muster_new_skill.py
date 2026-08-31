@@ -186,3 +186,80 @@ def test_skill_forbids_runtime_imports_in_team_code():
 def test_reference_files_are_substantive(name):
     body = read(name)
     assert len(body.splitlines()) > 20, f"{name} is a stub"
+
+
+# ------------------------------------------------------- staleness guards
+#
+# muster-new fell behind the repo once already: it was written before memory,
+# the launcher and the live Buzz work, and nothing noticed because nothing
+# checked. These assertions derive the capability list FROM THE CODE, so the
+# skill cannot quietly stop describing what the repo can do.
+
+REFERENCE_DIR = SKILL_DIR / "reference"
+
+
+def _all_skill_text() -> str:
+    parts = [SKILL.read_text()]
+    parts += [p.read_text() for p in sorted(REFERENCE_DIR.glob("*.md"))]
+    return " ".join(" ".join(parts).split()).lower()
+
+
+def test_every_llm_provider_is_offered():
+    from app.runtime.llm import PROVIDERS
+
+    text = _all_skill_text()
+    missing = [name for name in PROVIDERS if name not in text]
+    assert not missing, f"skill never mentions provider(s): {missing}"
+
+
+def test_every_memory_backend_and_permission_is_offered():
+    from app.memory import BACKENDS, PERMISSIONS
+
+    text = _all_skill_text()
+    assert not [b for b in BACKENDS if b not in text], "a memory backend is unmentioned"
+    assert not [p for p in PERMISSIONS if p not in text], "a memory permission is unmentioned"
+
+
+def test_every_cli_command_a_user_would_run_is_named():
+    from app.main import COMMANDS
+
+    text = _all_skill_text()
+    # `serve` is the durable service entrypoint, reached through `make dev`.
+    expected = set(COMMANDS) - {"serve"}
+    missing = [c for c in expected if f"app.main {c}" not in text]
+    assert not missing, f"skill never shows: {missing}"
+
+
+@pytest.mark.parametrize("surface", [
+    "app/web/app.py",        # the timeline + approvals
+    "bus/web/app.py",        # the bus session view
+    "app/memory",            # what the team learned
+])
+def test_named_monitoring_surfaces_exist(surface):
+    assert (REPO / surface).exists()
+
+
+def test_the_operating_model_explains_the_things_a_user_must_know():
+    """The user asked for exactly these; a skill that omits them is half a skill."""
+    text = _all_skill_text()
+    for topic in ("in-process", "durable", "intervene", "timeline",
+                  "approval", "monitor"):
+        assert topic in text, f"the skill never explains {topic!r}"
+
+
+def test_it_warns_that_in_process_is_not_durable():
+    """The expensive mistake: in-process looks identical until something crashes."""
+    text = _all_skill_text()
+    assert "not durable" in text
+
+
+def test_it_covers_the_whole_interview():
+    text = _all_skill_text()
+    for topic in ("approve", "side-effect", "timer", "model", "memory",
+                  "drive this from"):
+        assert topic in text, f"interview omits {topic!r}"
+
+
+def test_it_chains_to_the_buzz_skill():
+    assert "muster-buzz" in SKILL.read_text()
+    assert (REPO / ".claude/skills/muster-buzz/SKILL.md").is_file()

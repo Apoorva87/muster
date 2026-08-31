@@ -24,10 +24,14 @@ Supporting detail: `reference/topology.md` (decision rules + worked examples),
 
 ## Step 1 — Interview, in one batch
 
-Ask these seven. Use `AskUserQuestion` if the harness offers it: two calls of
-roughly four questions, never one question per turn. If the user already answered
-something in their opening request, do not ask it again — restate your reading of it
-and move on.
+Ask these eleven, in **three batches**. Use `AskUserQuestion` if the harness
+offers it — roughly four questions per call, never one question per turn. If the
+user already answered something in their opening request, do not ask it again:
+restate your reading of it and move on.
+
+Batch A is the shape of the work (1–7). Batch B is how it runs (8–9). Batch C is
+where the human sits (10–11). Batch C matters more than it looks — a team nobody
+watches and nobody can steer is not finished, it is abandoned.
 
 1. **What job does this team do?** One sentence. Becomes `team.description`.
    Also: a short stable slug for `team.id` (lowercase, alphanumeric plus `-`/`_`).
@@ -44,6 +48,39 @@ and move on.
    cheap deterministic check is. An LLM must never poll — see `app/agents/monitor.py`.
 7. **Who else calls this team or listens to it?** Fills `public.commands` and
    `public.topics`. Empty is a fine answer; standalone is the default.
+
+### Batch B — how it runs
+
+8. **Which model, and does any agent need a different one?** Default is `stub`
+   (deterministic, free, no network) so the team is testable before a model is
+   chosen. Then `ollama` for local, `anthropic`/`openai` for hosted, or
+   `claude_code`/`codex` when an agent needs real tools and file access rather
+   than chat completion. Set per agent in `team.yaml` — a cheap local model for
+   routine work and a stronger one for the critic is the common shape. Show them
+   `uv run python -m app.main providers` for what this machine can actually use.
+9. **Should this team learn across projects?** `MEMORY_BACKEND=none` is a fine
+   answer and the safe default — the team then behaves exactly as it would
+   without memory at all. If yes, pick a backend:
+   - `filesystem` — markdown plus lexical search. No service, no network, no
+     model. Enough for a small team, and the right first answer.
+   - `gbrain` — better retrieval via the `gbrain` CLI, one partition per team
+     inside a single shared brain. Opt-in; if it is missing, recall degrades to
+     lexical rather than failing.
+
+   Then ask **which agents** may read and which may write (`read-write`, `read`,
+   `off` per agent in `team.yaml`). A critic that remembers past objections is
+   useful; a research agent accumulating opinions usually is not.
+
+### Batch C — where the human sits
+
+10. **Where will you drive this from?** The CLI (`app.main run`), the local
+    timeline page, or a Buzz chat room. This decides what you build next, not
+    what goes in `team.yaml`, and it is the difference between a team someone
+    uses and a team that only passes tests.
+11. **Who is allowed to start work and answer approvals?** Only matters once it
+    leaves your laptop, but it is far easier to set now than after an incident —
+    an open room means anyone who can post can spend model budget and trigger
+    side effects.
 
 ## Step 2 — Critique the topology, before writing anything
 
@@ -214,6 +251,19 @@ Tell them:
 - to set the model per agent in `team.yaml` rather than globally, e.g. a cheap local
   model for routine work and a stronger one for the critic.
 
+Then **orient them**, using `reference/operating-model.md`. Do not skip this: a
+team the user cannot explain, watch or steer is not finished. Cover, briefly:
+
+- the parts, and which ones they will ever touch (few);
+- **in-process vs durable** — same agents, but in-process is NOT durable, and
+  confusing the two is the expensive mistake;
+- **when they must intervene**: an approval parked the flow, an `UNKNOWN` effect
+  needs reconciling, a memory note is wrong, an agent failed;
+- **where to watch**: the timeline at `python -m app.main web`, `python -m
+  app.main memory <team>`, the bus session view, Restate's UI at :9070;
+- **where to drive from**, matching their answer to question 10.
+
 Finally, offer the next step: **the `muster-buzz` skill** puts this team into a
 Buzz chat room, so projects start by someone typing `run <objective>` in a
-channel and approvals are answered there instead of in a CLI.
+channel and approvals are answered there instead of in a CLI — which is the
+right move as soon as anyone other than the author needs to watch or steer.
