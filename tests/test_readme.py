@@ -48,7 +48,9 @@ def test_inline_repo_paths_exist(text):
 
 def test_every_make_target_it_names_exists(text):
     makefile = (REPO / "Makefile").read_text()
-    targets = set(re.findall(r"`?make ([a-z-]+)`?", text))
+    # Backticks required: prose like "twenty rejections make twenty notes"
+    # is not a command reference.
+    targets = set(re.findall(r"`make ([a-z-]+)`", text))
     missing = [t for t in sorted(targets)
                if not re.search(rf"^{re.escape(t)}:", makefile, re.MULTILINE)]
     assert not missing, f"README names missing make targets: {missing}"

@@ -15,7 +15,7 @@ memory is written here. Agents are separate minds that exchange *references* —
 never a shared transcript.
 
 ```
-774 tests. They run with no Docker, no Restate, no Postgres and no model —
+787 tests. They run with no Docker, no Restate, no Postgres and no model —
 8 skip unless you install an optional extra, the rest pass.
 ```
 
@@ -374,7 +374,7 @@ protocol and tests inject a fake that records durable sends and models journal
 replay.
 
 ```bash
-uv run pytest                     # 774 tests
+uv run pytest                     # 787 tests
 uv run pytest -m integration      # needs `make up`, or a real gbrain/Buzz
 make demo                         # two teams over a bus
 ```
@@ -419,7 +419,12 @@ template/           what a new team copies
 demo/               the Buzz session demo
 docs/prd/           the four PRDs this was built from
 .claude/skills/     muster-new, muster-buzz
+CLAUDE.md           the map for a coding agent: rules, quirks, what is unfinished
 ```
+
+If you are pointing a coding agent at this repo, `CLAUDE.md` is what it should
+read first — it carries the durable-execution rules and the environment quirks
+that cost real time to rediscover. `tests/test_claude_md.py` keeps it honest.
 
 ---
 
